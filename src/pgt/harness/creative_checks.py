@@ -16,11 +16,16 @@ from pgt.schemas.weekly import (
     Answer,
     CreativeCopy,
     CreativeImage,
+    CreativeVideo,
     MarketResearch,
     TestPlanDraft,
 )
 
 COPY_LIMITS: dict[str, int] = {"headline": 40, "primary_text": 125, "description": 30}
+# Words on screen in the 10-second video: each line is read in under three seconds.
+VIDEO_LIMITS: dict[str, int] = {"hook": 34, "benefit": 34, "proof": 34, "cta": 20}
+SCENES = 3
+VARIANTS = SCENES
 
 _NUMBER = re.compile(
     r"(?<![\w.#])(?P<rank>#)?"
@@ -61,13 +66,33 @@ def check_copy(
     ledger: EvidenceLedger,
     fact_numbers: list[float],
     known_urls: set[str],
+    cta_buttons: list[str] | None = None,
 ) -> list[str]:
-    """Check copy lengths, claim citations and numeric support."""
+    """Check copy lengths, the three scenes, the storyboard, claim citations and numeric
+    support. Numbers in the video count like numbers in the ad text."""
     issues = []
     for field, limit in COPY_LIMITS.items():
         length = len(getattr(ad_copy, field))
         if length > limit:
             issues.append(f"{field} is {length} characters; the limit is {limit}.")
+
+    if len(ad_copy.scenes) != SCENES:
+        issues.append(f"The ad has {len(ad_copy.scenes)} scene(s); it needs {SCENES}.")
+    for index, scene in enumerate(ad_copy.scenes):
+        if not scene.prompt.strip() or not scene.angle.strip():
+            issues.append(f"Scene {index + 1} needs an angle and a prompt.")
+    angles = [scene.angle.strip().lower() for scene in ad_copy.scenes]
+    if len(set(angles)) != len(angles):
+        issues.append("Each scene needs a different angle.")
+    for field, limit in VIDEO_LIMITS.items():
+        text = getattr(ad_copy.video, field)
+        if not text.strip():
+            issues.append(f"Video {field} line is empty.")
+        elif len(text) > limit:
+            issues.append(f"Video {field} line is {len(text)} characters; the limit is {limit}.")
+    if cta_buttons and ad_copy.video.cta not in cta_buttons:
+        issues.append(f"Video button {ad_copy.video.cta!r} is not one of the advertiser's: "
+                      f"{', '.join(cta_buttons)}.")
 
     candidates = list(fact_numbers)
     for index, claim in enumerate(ad_copy.claims):
@@ -85,8 +110,10 @@ def check_copy(
                     f"Claim {index} cites a source URL that research did not find: {url}."
                 )
 
-    for field in COPY_LIMITS:
-        for value in extract_numbers(getattr(ad_copy, field)):
+    texts = {field: getattr(ad_copy, field) for field in COPY_LIMITS}
+    texts |= {f"video {field}": getattr(ad_copy.video, field) for field in VIDEO_LIMITS}
+    for field, text in texts.items():
+        for value in extract_numbers(text):
             if not number_matches(value, candidates):
                 issues.append(
                     f"Number {value:g} in {field} matches no cited evidence or shared fact."
@@ -105,15 +132,18 @@ def _check_image_size(ratio: str, width: int, height: int, issues: list[str]) ->
             issues.append(issue)
 
 
-def check_images(images: list[CreativeImage]) -> list[str]:
-    """Check placement coverage, dimensions and the actual local image bytes."""
+def check_images(images: list[CreativeImage], variants: int = VARIANTS) -> list[str]:
+    """Check that every scene has every placement size, the dimensions, and the actual local
+    image bytes."""
     issues = []
-    counts = Counter(image.ratio for image in images)
-    for ratio in CREATIVE_SIZES:
-        if counts[ratio] == 0:
-            issues.append(f"Missing image for {ratio}.")
-        elif counts[ratio] > 1:
-            issues.append(f"Duplicate image for {ratio}.")
+    counts = Counter((image.variant, image.ratio) for image in images)
+    for variant in range(1, variants + 1):
+        for ratio in CREATIVE_SIZES:
+            name = f"scene {variant} {ratio}" if variants > 1 else ratio
+            if counts[(variant, ratio)] == 0:
+                issues.append(f"Missing image for {name}.")
+            elif counts[(variant, ratio)] > 1:
+                issues.append(f"Duplicate image for {name}.")
 
     for image in images:
         ratio = image.ratio
@@ -135,6 +165,27 @@ def check_images(images: list[CreativeImage]) -> list[str]:
                 pixels.verify()
         except (OSError, ValueError, Image.DecompressionBombError):
             issues.append(f"Image {ratio} file cannot be read as an image.")
+    return issues
+
+
+def check_video(video: CreativeVideo | None) -> list[str]:
+    """Check the video file is there, unchanged, 9:16, and ten seconds long. No video (ffmpeg
+    missing) is not an issue: the ad still has its images."""
+    if video is None:
+        return []
+    issues = []
+    if (video.width, video.height) != CREATIVE_SIZES["9:16"]:
+        issues.append(f"Video is {video.width}x{video.height}; expected 1080x1920.")
+    if abs(video.seconds - 10) > 0.1:
+        issues.append(f"Video is {video.seconds:g} seconds; expected 10.")
+    try:
+        data = Path(video.path).read_bytes()
+    except OSError:
+        return [*issues, "Video file is missing."]
+    if hashlib.sha256(data).hexdigest() != video.sha256:
+        issues.append("Video file does not match its sha256.")
+    if data[4:8] != b"ftyp":
+        issues.append("Video file is not an MP4.")
     return issues
 
 

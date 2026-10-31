@@ -13,6 +13,7 @@ from pgt.harness.creative_checks import (
     check_images,
     check_plan,
     check_research,
+    check_video,
     extract_numbers,
 )
 from pgt.harness.workspace import Workspace
@@ -23,11 +24,14 @@ from pgt.schemas import (
     CreativeBrief,
     CreativeCopy,
     CreativeImage,
+    CreativeVideo,
     Evidence,
     MarketInsight,
     MarketResearch,
     PlannedTest,
+    Scene,
     Source,
+    Storyboard,
     TestPlanDraft,
 )
 
@@ -57,7 +61,13 @@ def copy(**update):
         claims=[
             Claim(text="42 people started", evidence_ids=["ev-d7-test_1-readout"], source_urls=[])
         ],
-        image_prompt="A bright living room at sunrise, empty floor space, soft light",
+        scenes=[
+            Scene(angle="Sunrise", prompt="A bright living room at sunrise, empty floor space"),
+            Scene(angle="Lunch break", prompt="A tidy home office at midday, clear floor"),
+            Scene(angle="Evening", prompt="A cosy bedroom corner in lamp light, empty rug"),
+        ],
+        video=Storyboard(hook="Ten minutes a day", benefit="Fits before work",
+                         proof="Free 7-day trial", cta="Try It"),
     )
     return base.model_copy(update=update)
 
@@ -145,27 +155,73 @@ def write_image(tmp_path, ratio, size=None):
     return CreativeImage(ratio=ratio, width=w, height=h, path=str(path), sha256=digest)
 
 
+def test_scenes_and_storyboard(ledger):
+    scenes = copy().scenes
+    issues = check_copy(copy(scenes=scenes[:2]), ledger, [7, 10], set())
+    assert "The ad has 2 scene(s); it needs 3." in issues
+    same = [scenes[0], scenes[1], scenes[1]]
+    assert "Each scene needs a different angle." in check_copy(copy(scenes=same), ledger, [7], set())
+
+    long_hook = Storyboard(hook="x" * 35, benefit="b", proof="p", cta="Shop Now")
+    issues = check_copy(copy(video=long_hook), ledger, [7], set(), ["Try It", "Sign Up"])
+    assert "Video hook line is 35 characters; the limit is 34." in issues
+    assert "Video button 'Shop Now' is not one of the advertiser's: Try It, Sign Up." in issues
+
+    # Numbers on screen in the video need support like numbers in the ad text.
+    made_up = Storyboard(hook="Join 40 friends", benefit="b", proof="p", cta="Try It")
+    assert check_copy(copy(video=made_up), ledger, [7, 10], set()) == [
+        "Number 40 in video hook matches no cited evidence or shared fact."
+    ]
+
+
+def test_every_scene_needs_every_size(tmp_path):
+    images = []
+    for variant in (1, 2, 3):
+        folder = tmp_path / f"v{variant}"
+        folder.mkdir()
+        images += [write_image(folder, r).model_copy(update={"variant": variant})
+                   for r in CREATIVE_SIZES]
+    assert check_images(images) == []
+    assert check_images(images[:-1]) == ["Missing image for scene 3 9:16."]
+
+
+def test_video(tmp_path):
+    path = tmp_path / "video.mp4"
+    path.write_bytes(b"\x00\x00\x00\x20ftypisom" + b"\x00" * 64)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    video = CreativeVideo(width=1080, height=1920, seconds=10, path=str(path), sha256=digest)
+    assert check_video(video) == []
+    assert check_video(None) == []
+    assert "Video is 6 seconds; expected 10." in check_video(video.model_copy(update={"seconds": 6}))
+    assert "Video file does not match its sha256." in check_video(
+        video.model_copy(update={"sha256": "0" * 64})
+    )
+    assert check_video(video.model_copy(update={"path": str(tmp_path / "gone.mp4")})) == [
+        "Video file is missing."
+    ]
+
+
 def test_images(tmp_path):
     images = [write_image(tmp_path, r) for r in CREATIVE_SIZES]
-    assert check_images(images) == []
+    assert check_images(images, variants=1) == []
 
-    assert check_images(images[:2]) == ["Missing image for 9:16."]
-    assert "Duplicate image for 1:1." in check_images([*images, images[0]])
+    assert check_images(images[:2], variants=1) == ["Missing image for 9:16."]
+    assert "Duplicate image for 1:1." in check_images([*images, images[0]], variants=1)
 
     wrong = images[1].model_copy(update={"width": 1000})
     assert "Image 4:5 is 1000x1350; expected 1080x1350." in check_images(
-        [images[0], wrong, images[2]]
+        [images[0], wrong, images[2]], variants=1
     )
 
     missing = images[0].model_copy(update={"path": str(tmp_path / "gone.png")})
-    assert "Image 1:1 file is missing." in check_images([missing, *images[1:]])
+    assert "Image 1:1 file is missing." in check_images([missing, *images[1:]], variants=1)
 
     tampered = images[0].model_copy(update={"sha256": "0" * 64})
-    assert "Image 1:1 file does not match its sha256." in check_images([tampered, *images[1:]])
+    assert "Image 1:1 file does not match its sha256." in check_images([tampered, *images[1:]], variants=1)
 
     (tmp_path / "small").mkdir()
     small = write_image(tmp_path / "small", "9:16", size=(500, 500))
-    issues = check_images([*images[:2], small])
+    issues = check_images([*images[:2], small], variants=1)
     assert "Image 9:16 is 500x500; expected 1080x1920." in issues
 
 

@@ -217,7 +217,10 @@ async def _weekly(args) -> None:
             print(f'  {d.name} in {d.campaign_id}: "{copy["headline"]}"')
             print(f"    {copy['primary_text']}")
             folder = Path(creative["images"][0]["path"]).parent
-            print(f"    Images (1:1, 4:5, 9:16): {folder}")
+            scenes = len(copy.get("scenes", [])) or 1
+            print(f"    {scenes} scenes x 3 sizes (1:1, 4:5, 9:16): {folder}")
+            if creative.get("video"):
+                print(f"    10-second video: {creative['video']['path']}")
         if not _ask("Approve creating these ads, paused?", args.yes):
             print("Stopped before the sandbox. Nothing was changed.")
             return

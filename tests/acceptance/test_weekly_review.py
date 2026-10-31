@@ -10,8 +10,21 @@ from pgt.llm.media import MediaClient
 from pgt.llm.offline import offline_model, offline_responder, tool_outputs
 from pgt.loops.simulate import simulate
 from pgt.loops.weekly import apply_week, plan_week, produce_week
-from pgt.schemas import ChangeSet, Claim, CreativeCopy
+from pgt.schemas import ChangeSet, Claim, CreativeCopy, Scene, Storyboard
 from pgt.schemas import TestPlan as Plan
+
+
+def three_scenes():
+    return [
+        Scene(angle="Morning", prompt="A bright living room at sunrise with open floor space"),
+        Scene(angle="Midday", prompt="A tidy home office corner at midday, clear floor"),
+        Scene(angle="Evening", prompt="A cosy bedroom corner in lamp light, empty rug"),
+    ]
+
+
+def storyboard():
+    return Storyboard(hook="Ten minutes. Your living room.", benefit="Fits before work",
+                      proof="Short plans you keep", cta="Try It")
 
 
 def week_one(responder=offline_responder):
@@ -103,7 +116,8 @@ def test_scenario_2_unsupported_claim_is_sent_back(tmp_path):
             claims=[
                 Claim(text="fits your day", evidence_ids=outputs[0]["evidence_ids"], source_urls=[])
             ],
-            image_prompt="A bright living room with open floor space",
+            scenes=three_scenes(),
+            video=storyboard(),
         )
 
     ws, account, model, fake = week_one(first_draft_for("w1-t1", bad))
@@ -130,7 +144,8 @@ def test_scenario_3_wrong_number_is_blocked_by_code(tmp_path):
             description="Start your free trial",
             # The cited evidence says the drop was 51%.
             claims=[Claim(text="CTR fell 50%", evidence_ids=["ev-d3-ad_1-ctr"], source_urls=[])],
-            image_prompt="A bright living room with open floor space",
+            scenes=three_scenes(),
+            video=storyboard(),
         )
 
     ws, account, model, fake = week_one(first_draft_for("w1-t1", bad))

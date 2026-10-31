@@ -615,7 +615,9 @@ def _creative(ws: Workspace, key: str, media_dir: str | None) -> dict | None:
     return {"key": key, "title": title(record), "ad_copy": c.get("ad_copy", {}),
             "test_id": c.get("test_id"),
             "images": [{**img, "url": _media_url(img["path"], media_dir)}
-                       for img in c.get("images", [])]}
+                       for img in c.get("images", [])],
+            "video": {**c["video"], "url": _media_url(c["video"]["path"], media_dir)}
+            if c.get("video") else None}
 
 
 def detail(ws: Workspace, key: str, account=None, media_dir: str | None = None) -> dict | None:

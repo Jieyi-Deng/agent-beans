@@ -20,18 +20,22 @@ from PIL import Image
 from pydantic_ai.models import Model
 
 from pgt.creative.compose import (
+    INK,
     cutout,
     make_demo_product_shot,
+    matte,
     png_bytes,
     render_creative,
     save_png,
 )
+from pgt.creative.video import Cut, EndCard, contact_sheet, encode, hex_rgb
 from pgt.harness.creative_checks import (
     allocate_budget,
     check_copy,
     check_images,
     check_plan,
     check_research,
+    check_video,
     extract_numbers,
 )
 from pgt.harness.policy import CostMeter
@@ -47,6 +51,7 @@ from pgt.roles.producer import run_producer
 from pgt.roles.reviewer import review_creative, review_findings
 from pgt.roles.strategist import run_research
 from pgt.sandbox import SandboxAccount, product_names, product_photo
+from pgt.sandbox.scenario import CreativeKit
 from pgt.schemas import (
     CREATIVE_SIZES,
     AdDraft,
@@ -55,6 +60,7 @@ from pgt.schemas import (
     CreativeImage,
     CreativeReview,
     CreativeSet,
+    CreativeVideo,
     ExecutionReceipt,
     Finding,
     Findings,
@@ -383,13 +389,19 @@ async def _weekly_findings(scope, model, facts, fv, week, signals, evidence) -> 
 # --- Stage 2: produce ------------------------------------------------------------------------
 
 
-def fact_numbers(facts: SharedFacts) -> list[float]:
-    """Numbers ad copy may use without citing evidence: those stated in the facts' text, plus
-    the target and budget. House-rule numbers are left out on purpose."""
-    text = " ".join(
-        [facts.product, facts.audience, facts.goal, facts.brand_voice, *facts.constraints]
-    )
-    return [*extract_numbers(text), facts.target_cost_per_result, facts.weekly_budget]
+def fact_numbers(facts: SharedFacts, kit: CreativeKit | None = None) -> list[float]:
+    """Numbers ad copy may use without citing evidence: those stated in the facts' text and in
+    the advertiser's creative kit (offer, product cards), plus the target and budget.
+    House-rule numbers are left out on purpose."""
+    parts = [facts.product, facts.audience, facts.goal, facts.brand_voice, *facts.constraints]
+    if kit is not None:
+        parts += [kit.offer, *(p for card in kit.products for p in card.selling_points)]
+    return [*extract_numbers(" ".join(parts)), facts.target_cost_per_result, facts.weekly_budget]
+
+
+def creative_kit(account) -> CreativeKit | None:
+    scenario = getattr(account, "scenario", None)
+    return getattr(scenario, "creative", None)
 
 
 def _require_approval(ws: Workspace, key: str, stage: str, sim_day: int) -> None:
@@ -456,8 +468,14 @@ async def produce_week(
         except ValueError:
             escalate(scope, "producer", f"SAM 3.1 found no {concept} in the product photo.")
             return _summary(scope, week, "escalated", plan_id=plan.plan_id)
-        cutouts[concept] = cutout(shot, boxes[0])
+        try:
+            cutouts[concept] = matte(shot, boxes[0])
+        except ValueError:
+            # Busy photo: fall back to the box itself with rounded corners.
+            cutouts[concept] = cutout(shot, boxes[0])
     backgrounds: dict[str, Image.Image] = {}
+    kit = creative_kit(account)
+    allowed_numbers = fact_numbers(facts, kit)
 
     async def answer_for(question: str, issues: list[str]):
         return await run_answer(scope, model, facts, fv, question, evidence, issues)
@@ -481,10 +499,13 @@ async def produce_week(
         last = ws.artifacts.latest(f"week{week}/creative/{test.test_id}")
         first = last.content["attempt"] + 1 if last else 1
         for attempt in range(first, first + MAX_ATTEMPTS):
-            ad_copy = await run_producer(scope, model, facts, fv, test, insights, ask, issues)
+            ad_copy = await run_producer(
+                scope, model, facts, fv, test, insights, ask, issues, kit
+            )
             creative_id = f"{test.test_id}-c{attempt}"
-            images, square = await _render(
-                scope, media, ad_copy, cutouts[shown(test)], backgrounds, media_dir / creative_id
+            images, video, sheet = await _render(
+                scope, media, ad_copy, cutouts[shown(test)], backgrounds, media_dir / creative_id,
+                kit,
             )
             creative = CreativeSet(
                 creative_id=creative_id,
@@ -492,6 +513,7 @@ async def produce_week(
                 attempt=attempt,
                 ad_copy=ad_copy,
                 images=images,
+                video=video,
                 question_ids=_question_ids(scope, test.test_id),
             )
             creative_rec = ws.artifacts.publish(
@@ -503,11 +525,15 @@ async def produce_week(
                 sim_day=account.day,
                 status="in_review",
             )
-            issues = check_copy(ad_copy, ws.ledger, fact_numbers(facts), known_urls)
-            issues += check_images(images)
+            issues = check_copy(ad_copy, ws.ledger, allowed_numbers, known_urls,
+                                kit.cta_buttons if kit else None)
+            issues += check_images(images, variants=len(ad_copy.scenes) or 1)
+            issues += check_video(video)
             by = "code"
             if not issues:
-                review = await review_creative(scope, model, facts, fv, test, ad_copy, square)
+                review = await review_creative(
+                    scope, model, facts, fv, test, ad_copy, sheet, kit
+                )
                 issues = [] if review.verdict == "pass" else review.issues or ["Redo requested."]
                 by = "reviewer"
             ws.artifacts.publish(
@@ -608,24 +634,43 @@ async def _render(
     product: Image.Image,
     backgrounds: dict[str, Image.Image],
     folder: Path,
-) -> tuple[list[CreativeImage], bytes]:
-    """Background from Muse Image (cached per prompt), then the three placement sizes."""
-    if ad_copy.image_prompt not in backgrounds:
-        backgrounds[ad_copy.image_prompt] = await media.background(
-            scope, "producer", ad_copy.image_prompt
+    kit: CreativeKit | None = None,
+) -> tuple[list[CreativeImage], CreativeVideo | None, bytes]:
+    """One Muse Image background per scene (cached per prompt), each scene in the three
+    placement sizes, then the 10-second video from the same scenes. Also returns the contact
+    sheet the Reviewer looks at: the square image of each scene and the video's shots."""
+    prompts = [scene.prompt for scene in ad_copy.scenes]
+    missing = [p for p in dict.fromkeys(prompts) if p not in backgrounds]
+    painted = await asyncio.gather(
+        *(media.background(scope, "producer", prompt) for prompt in missing)
+    )
+    backgrounds.update(zip(missing, painted, strict=True))
+    scenes = [backgrounds[p] for p in prompts]
+
+    brand = kit.brand if kit else None
+    ink = hex_rgb(kit.colors.get("ink"), INK) if kit else INK
+    images, squares = [], []
+    for variant, background in enumerate(scenes, start=1):
+        for ratio, (width, height) in CREATIVE_SIZES.items():
+            rendered = render_creative(background, product, ad_copy.headline, ratio, brand, ink)
+            path = folder / f"v{variant}-{ratio.replace(':', 'x')}.png"
+            digest = save_png(rendered.image, path)
+            images.append(CreativeImage(ratio=ratio, width=width, height=height, path=str(path),
+                                        sha256=digest, variant=variant))
+            if ratio == "1:1":
+                squares.append(rendered.image)
+
+    card = (EndCard(kit.brand, kit.offer, kit.sign_off, kit.colors) if kit else EndCard())
+    cut = Cut(scenes, product, ad_copy.video, ad_copy.headline, card)
+    video = await asyncio.to_thread(encode, cut, folder / "video.mp4")
+    if video is None:
+        scope.ws.events.append(
+            "creative.video_skipped", "producer",
+            {"folder": str(folder), "reason": "ffmpeg is not installed"},
+            loop_id=scope.loop_id,
         )
-    background = backgrounds[ad_copy.image_prompt]
-    images, square = [], b""
-    for ratio, (width, height) in CREATIVE_SIZES.items():
-        rendered = render_creative(background, product, ad_copy.headline, ratio)
-        path = folder / f"{ratio.replace(':', 'x')}.png"
-        digest = save_png(rendered.image, path)
-        images.append(
-            CreativeImage(ratio=ratio, width=width, height=height, path=str(path), sha256=digest)
-        )
-        if ratio == "1:1":
-            square = png_bytes(rendered.image)
-    return images, square
+    sheet = contact_sheet(squares, cut.keyframes())
+    return images, video, png_bytes(sheet)
 
 
 def _question_ids(scope: Scope, task_id: str) -> list[str]:

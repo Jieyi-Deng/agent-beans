@@ -3,13 +3,9 @@
 // three. The public demo only offers the labelled sandbox; the real Facebook Login for Business
 // runs on facebook.com, from a local install.
 import { useEffect, useState } from "react";
-import { api, money, type AccessData, type Account, type FactsPatch, type Reads, type Rules, type RulesPatch } from "./api";
+import { api, date, money, type AccessData, type Account, type FactsPatch, type Reads, type Rules, type RulesPatch } from "./api";
 import { go } from "./route";
 import { OWNER } from "./ui";
-
-function date(ts: string) {
-  return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
 
 function useAct(onDone: () => void) {
   const [error, setError] = useState<string | null>(null);

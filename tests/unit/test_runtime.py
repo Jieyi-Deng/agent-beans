@@ -67,6 +67,31 @@ def test_blocked_tool_never_runs():
     assert len(ws.events.list("model.call")) == 2 and fake.violations == []
 
 
+def test_repeated_identical_tool_call_is_cut_short():
+    ran = []
+
+    def get_evidence(evidence_id: str) -> str:
+        """Read one evidence row."""
+        ran.append(evidence_id)
+        return "row"
+
+    def responder(body):
+        outputs = [i for i in body["input"] if i.get("type") == "function_call_output"]
+        if any("Hand in your final answer" in o["output"] for o in outputs):
+            return Findings(findings=[])
+        return FunctionCall("get_evidence", {"evidence_id": "ev-1"})
+
+    fake = MetaFake(responder)
+    ws = Workspace()
+    scope = Scope(ws, CostMeter(ws.events), "loop-1", 1)
+    out = asyncio.run(
+        run_role("analyst", Findings, pack(), scope, responses_model(fake.client()), [get_evidence])
+    )
+    assert out == Findings(findings=[])
+    assert ran == ["ev-1", "ev-1"]
+    assert len(ws.events.list("model.call")) == 4
+
+
 def test_call_to_a_tool_the_role_was_never_given_is_logged():
     # A prompt injection asks for a write tool the role does not have: the attempt is logged
     # once, nothing runs, and the role still finishes.

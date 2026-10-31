@@ -35,7 +35,9 @@ from pgt.schemas import (
     MarketInsight,
     MarketResearch,
     PlannedTest,
+    Scene,
     Source,
+    Storyboard,
     TestPlanDraft,
     TestReadout,
     WeeklyBrief,
@@ -238,7 +240,16 @@ APP = {
     "key_message": "Short home workouts you can keep up.",
     "primary_text": "Short home workouts that fit your day. Keep your streak going.",
     "description": "Start your free trial",
-    "scene": "A calm, bright living room with open floor space",
+    "scenes": (
+        ("Morning before work", ("A calm, bright living room at sunrise, a rolled yoga mat by "
+         "the window, open wooden floor in the lower middle, soft warm light")),
+        ("Lunch break at home", ("A tidy home office corner at midday, a water bottle on the "
+         "desk, a small rug with clear floor space in the lower middle, daylight")),
+        ("Evening wind-down", ("A cosy bedroom corner in the evening, a folded towel and a mug "
+         "of tea on a low shelf, empty rug in the lower middle, lamp light")),
+    ),
+    "video": ("Ten minutes. Your living room.", "Fits before work or after", "Free 7-day trial",
+              "Try It"),
 }
 STORE = {
     "product": "dog harness",
@@ -248,7 +259,16 @@ STORE = {
     "primary_text": "Our no-pull harness spreads the pull across the chest, so the daily walk "
                     "feels easy for both of you. Free shipping over $50.",
     "description": "Shop the harness",
-    "scene": "A leafy park path in soft morning light, open ground in the middle",
+    "scenes": (
+        ("Morning park walk", ("A leafy park path in soft morning light, autumn leaves on the "
+         "ground, open path in the lower middle")),
+        ("By the front door", ("A bright entryway with a leash hook by the front door, wooden "
+         "floor with clear space in the lower middle, window light")),
+        ("Autumn street", ("A quiet tree-lined street in autumn, warm low sun, clean pavement in "
+         "the lower middle")),
+    ),
+    "video": ("The walk you both look forward to", "Spreads the pull across the chest",
+              "Free shipping over $50", "Shop Now"),
 }
 
 OFFLINE_INSIGHTS = [
@@ -400,6 +420,9 @@ def _creative_copy(
     evidence_ids = next((o["evidence_ids"] for o in outputs if o.get("evidence_ids")), [])
     brief = test["brief"]
     redo = bool(_owner_notes(inputs))
+    hook, benefit, proof, cta = flavor["video"]
+    if redo:
+        hook = brief["key_message"][:34]
     return CreativeCopy(
         name=f"{brief['angle']} {'v2' if redo else 'v1'}",
         # A rule-based stand-in cannot read the note; it switches to the key message so the
@@ -408,7 +431,9 @@ def _creative_copy(
         primary_text=flavor["primary_text"],
         description=flavor["description"],
         claims=[Claim(text=brief["key_message"], evidence_ids=evidence_ids, source_urls=[])],
-        image_prompt=f"{flavor['scene']}, mood: {brief['angle']}",
+        scenes=[Scene(angle=angle, prompt=f"{prompt}, mood: {brief['angle']}")
+                for angle, prompt in flavor["scenes"]],
+        video=Storyboard(hook=hook, benefit=benefit, proof=proof, cta=cta),
     )
 
 

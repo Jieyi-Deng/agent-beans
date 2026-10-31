@@ -424,21 +424,23 @@ class Renderer:
         self.product = cutout(shot, parse_sam_output(segmented.output_text)[0])
 
     async def render(self, ad_copy: CreativeCopy, folder: str) -> tuple[list[CreativeImage], bytes]:
-        """Returns the images and the 1:1 version as PNG bytes, for the reviewer."""
-        if ad_copy.image_prompt not in self.backgrounds:
+        """Returns the images and the 1:1 version as PNG bytes, for the reviewer. Baseline arms
+        render the first scene only."""
+        prompt = ad_copy.scenes[0].prompt
+        if prompt not in self.backgrounds:
             made = await self.client.images.generate(
                 model=IMAGE_MODEL,
-                prompt=ad_copy.image_prompt,
+                prompt=prompt,
                 n=1,
                 size="1024x1024",
                 response_format="b64_json",
             )
             raw = base64.b64decode(made.data[0].b64_json)
-            self.backgrounds[ad_copy.image_prompt] = Image.open(BytesIO(raw)).convert("RGB")
+            self.backgrounds[prompt] = Image.open(BytesIO(raw)).convert("RGB")
         images, square = [], b""
         for ratio, (width, height) in CREATIVE_SIZES.items():
             rendered = render_creative(
-                self.backgrounds[ad_copy.image_prompt], self.product, ad_copy.headline, ratio
+                self.backgrounds[prompt], self.product, ad_copy.headline, ratio
             )
             path = self.media_dir / folder / f"{ratio.replace(':', 'x')}.png"
             digest = save_png(rendered.image, path)

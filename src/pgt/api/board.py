@@ -6,6 +6,7 @@ workspace (what the team did, and how each image was made). Nothing here writes.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from pgt.api.views import OWNER, Index, _media_url, period, provider, role, title
@@ -384,6 +385,24 @@ def _after(account, ad_id: str | None, target: float, result_name: str) -> tuple
     return f"CTR {m['ctr']:.2%} · {cpr}", m["tone"] == "over"
 
 
+def _scene_prompts(copy: dict) -> list[str]:
+    """Scene prompts of a saved ad; ads saved before scenes have one image_prompt."""
+    if copy.get("scenes"):
+        return [s.get("prompt", "") for s in copy["scenes"]]
+    return [copy["image_prompt"]] if copy.get("image_prompt") else []
+
+
+def _ad_name(name: str | None, test_id: str) -> str:
+    """The model sometimes starts the ad name with its test ID; the card shows that ID already."""
+    if not name:
+        return test_id
+    week, _, short = test_id.rpartition("-")  # "w1-t2" is also written "T2" or "W1"
+    ids = "|".join(re.escape(x) for x in (test_id, short, week) if x)
+    lead = rf"^\s*(?:{ids})\b\s*[-:·]?\s*"
+    rest = re.sub(lead, "", name, flags=re.IGNORECASE)
+    return rest or name
+
+
 def _made(ws, idx, account, media_dir, record, plans, facts) -> dict:
     c = record.content
     week = record.key.split("/")[0]
@@ -394,7 +413,7 @@ def _made(ws, idx, account, media_dir, record, plans, facts) -> dict:
     status, label, ad_id = _creative_status(ws, idx, account, record, cs)
     after, bad = _after(account, ad_id, facts.target_cost_per_result, facts.result_name)
     versions = [r for r in ws.artifacts.list(kind="CreativeSet") if r.key == record.key]
-    prompts = {v.content.get("ad_copy", {}).get("image_prompt") for v in versions}
+    prompts = {p for v in versions for p in _scene_prompts(v.content.get("ad_copy", {}))}
     sam = _step_model(_calls(ws, loop, SAM_MODEL))
     image = _step_model([e for e in _calls(ws, loop, IMAGE_MODEL)
                          if e.payload.get("prompt") in prompts])
@@ -421,9 +440,16 @@ def _made(ws, idx, account, media_dir, record, plans, facts) -> dict:
          "model": {"model": " + ".join(m.replace("meta-models/", "") for m in text_models),
                    "provider": provider(text_models[0]), "calls": None, "cost": None}
          if text_models else None, "final": False},
-        {"title": "New background, three sizes", "sub": copy.get("image_prompt", ""),
-         "model": image, "final": False},
+        {"title": "Three scenes, three sizes each", "model": image, "final": False,
+         "sub": " · ".join(s.get("angle", "") for s in copy.get("scenes", []))
+         or copy.get("image_prompt", "")},
     ]
+    if c.get("video"):
+        story = copy.get("video", {})
+        steps.append({"title": "10-second video, assembled in code", "model": None,
+                      "final": False,
+                      "sub": " / ".join(story.get(k, "") for k in ("hook", "benefit", "proof"))
+                      + f" / {story.get('cta', '')} end card"})
     returned = [e for e in ws.events.list("approval.returned")
                 if e.payload["key"] == f"{week}/change_set"]
     redos = ws.events.list("review.redo", loop_id=loop)
@@ -444,14 +470,17 @@ def _made(ws, idx, account, media_dir, record, plans, facts) -> dict:
                       "sub": "Every claim traces to evidence", "model": None, "final": True})
     images = [{**img, "url": _media_url(img["path"], media_dir)} for img in c.get("images", [])]
     square = next((i["url"] for i in images if i["ratio"] == "1:1"), None)
+    video = c.get("video")
+    video_url = _media_url(video["path"], media_dir) if video else None
     pub = idx.published.get(record.artifact_id)
     return {
-        "id": record.key, "kind": "made", "title": copy.get("name") or test_id,
+        "id": record.key, "kind": "made", "title": _ad_name(copy.get("name"), test_id),
         "hook": copy.get("headline", ""), "test_id": test_id, "week": period(record.key),
         "status": status, "status_label": label, "version": record.version,
         "updated": pub.ts if pub else None,
         "models": [s["model"]["model"] for s in steps if s["model"]],
         "after": after, "bad": bad, "image": square, "images": images,
+        "video": video_url, "scenes": [s.get("angle", "") for s in copy.get("scenes", [])],
         "source": _media_url(str(shot), media_dir) if shot.is_file() else None,
         "steps": steps,
         "facts": [

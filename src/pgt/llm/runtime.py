@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any
@@ -80,6 +81,7 @@ class _Harness(AbstractCapability):
         self.searches = 0
         self.citations: list[tuple[str, str]] = []
         self.blocked: set[str] = set()  # tool call IDs already refused and logged
+        self.repeats: dict[str, int] = {}  # tool + args -> times called this run
 
     def _record_hosted(self, response: ModelResponse) -> int:
         """Log hosted (server-side) tool calls such as web search, and collect citations."""
@@ -182,6 +184,15 @@ class _Harness(AbstractCapability):
             return f"Role {self.role} is not allowed to call {call.tool_name}."
         if error := check_tool(self.role, call.tool_name, events, self.scope.loop_id):
             return error
+        # Open-weight models sometimes fetch the same thing over and over. The answer is
+        # already in the conversation, so after two identical calls the tool says so.
+        same = f"{call.tool_name}:{json.dumps(call.args_as_dict(), sort_keys=True)}"
+        self.repeats[same] = self.repeats.get(same, 0) + 1
+        if self.repeats[same] > 2:
+            return (
+                f"You already called {call.tool_name} with these arguments and have the result "
+                "above. Do not call it again. Hand in your final answer now."
+            )
         events.append(
             "tool.call",
             self.role,
@@ -231,6 +242,8 @@ async def run_role_full[T: BaseModel](
         output_type=_output_spec(model, output_type, tools),
         tools=list(tools),
         capabilities=[harness, *capabilities],
+        # Open-weight models sometimes miss the schema once; one extra try keeps a day from failing.
+        retries={"tools": 1, "output": 2},
         model_settings={"tool_choice": "auto", "openai_store": False},
     )
     agent.instrument = False
