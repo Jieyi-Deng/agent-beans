@@ -32,6 +32,7 @@ from pgt.creative.design import Style, compose
 from pgt.creative.video import Cut, contact_sheet, encode
 from pgt.harness.creative_checks import (
     allocate_budget,
+    check_captions,
     check_copy,
     check_design,
     check_images,
@@ -508,7 +509,7 @@ async def produce_week(
             )
             creative_id = f"{test.test_id}-c{attempt}"
             concept = shown(test)
-            images, video, sheet, laid_out = await _render(
+            images, video, sheet, laid_out, captions = await _render(
                 scope, media, ad_copy, concept, references[concept], cutouts[concept], photos,
                 media_dir / creative_id, kit,
             )
@@ -535,6 +536,7 @@ async def produce_week(
             issues += check_images(images, variants=len(ad_copy.scenes) or 1)
             issues += check_video(video)
             issues += check_design(concept, laid_out)
+            issues += check_captions(concept, captions)
             by = "code"
             if not issues:
                 review = await review_creative(
@@ -643,11 +645,12 @@ async def _render(
     photos: dict[tuple[str, str], tuple[Image.Image, Box | None]],
     folder: Path,
     kit: CreativeKit | None = None,
-) -> tuple[list[CreativeImage], CreativeVideo | None, bytes, list]:
+) -> tuple[list[CreativeImage], CreativeVideo | None, bytes, list, list[tuple[int, float]]]:
     """Each scene as a Muse Image photograph with the real product in it (the product photo is
     the reference; cached per prompt), where SAM 3.1 finds the product; then each scene laid out
     in the three placement sizes and the 10-second video from the same shots. Also returns the
-    contact sheet the Reviewer looks at and every laid-out picture for the design checks."""
+    contact sheet the Reviewer looks at, every laid-out picture for the design checks, and how
+    much of the product each video caption covers, by scene number."""
     prompts = [shot_prompt(scene, concept, kit) for scene in ad_copy.scenes]
     missing = [p for p in dict.fromkeys(prompts) if (concept, p) not in photos]
 
@@ -690,7 +693,8 @@ async def _render(
             loop_id=scope.loop_id,
         )
     sheet = contact_sheet(squares, cut.keyframes(), reference)
-    return images, video, png_bytes(sheet), laid_out
+    captions = [(i % len(scenes) + 1, share) for i, share in enumerate(cut.covered())]
+    return images, video, png_bytes(sheet), laid_out, captions
 
 
 def _keep_shots(folder: Path, scenes: list[tuple[Image.Image, Box | None]]) -> None:

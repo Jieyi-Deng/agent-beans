@@ -133,3 +133,16 @@ def test_the_9x16_wordmark_and_button_stay_off_a_product_in_the_middle(layout):
     design = compose(image, middle, "9:16", layout, "Calmer walks start here", style)
     assert covered(design.product_box, design.text_boxes) == 0
     assert all(box[3] < design.product_box[1] for box in design.text_boxes)  # all above it
+
+
+def test_the_9x16_panel_moves_its_words_onto_a_strip_when_the_product_is_big():
+    photo = Image.new("RGB", (1280, 1920), (214, 200, 178))
+    big = Box(240, 300, 1040, 1560, 1280, 1920)  # two thirds of the frame's height
+    ImageDraw.Draw(photo).rectangle((big.x1, big.y1, big.x2, big.y2), fill=(30, 34, 40))
+    style = Style.from_kit(pet_store_kit(), "Shop Now")
+    design = compose(photo, big, "9:16", "panel", "Fresh water all day", style)
+    assert design.layout == "panel"
+    assert design.image.getpixel((540, 20)) == style.panel  # the strip runs across the top
+    assert design.product_box[1] > max(box[3] for box in design.text_boxes)  # photo below it
+    assert design.product_shown >= 0.95
+    assert check_design("cat water fountain", [(1, "9:16", design)]) == []

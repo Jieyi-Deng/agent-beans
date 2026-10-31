@@ -319,6 +319,15 @@ def check_design(product: str, designs) -> list[str]:
     return list(dict.fromkeys(issues))
 
 
+def check_captions(product: str, captions: list[tuple[int, float]]) -> list[str]:
+    """Check the video: each caption keeps off the product. `captions` is a list of
+    (scene number, share of the product the caption sits on), one per shot."""
+    issues = [f"Video, scene {n}: the caption sits on the {product}. Show it smaller in that "
+              "scene (about a third of the frame's height), with calm space above it."
+              for n, share in captions if share > MAX_COVERED]
+    return list(dict.fromkeys(issues))
+
+
 def _covered(design) -> float:
     from pgt.creative.design import covered
 

@@ -3,8 +3,9 @@
 Meta's model API has no video model, so nothing here is generated video. The Producer writes a
 storyboard; Muse Image renders the three shots with the real product in them; SAM 3.1 finds the
 product. This module moves the camera toward the product in each shot, slides the storyboard
-lines in over a wash that keeps them readable, cross-fades between shots and ends on a packshot
-card with the offer and the button, all in the brand's type. ffmpeg encodes the MP4.
+lines in over a wash that keeps them readable (or on a brand strip when the product is too
+big to clear them), cross-fades between shots and ends on a packshot card with the offer and
+the button, all in the brand's type. ffmpeg encodes the MP4.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from PIL import Image, ImageDraw
 
 from pgt.creative.compose import Box, place_product
 from pgt.creative.design import (
+    FIT_COVERED,
     Style,
     _map,
     block_height,
@@ -29,6 +31,7 @@ from pgt.creative.design import (
     pill_size,
     product_rect,
     safe_rect,
+    shown,
     type_face,
     wash_for,
     wordmark,
@@ -76,34 +79,61 @@ class _Line:
 class _Shot:
     """One moving shot. Its words sit at the bottom of the safe zone, or just under the wordmark
     when the product would be behind them at the bottom; the camera aims the product at the
-    space the words leave free."""
+    space the words leave free. When the product is too big to clear the words either way, the
+    wordmark and words move onto a brand-colour strip across the top and the photo runs below;
+    `strip` puts them there whenever the product fits, so a video keeps one caption style."""
 
-    def __init__(self, photo: Image.Image, box: Box | None, move, text: str, style: Style) -> None:
+    def __init__(self, photo: Image.Image, box: Box | None, move, text: str, style: Style,
+                 strip: bool = False) -> None:
         self.photo = photo.convert("RGB")
         self.rect = product_rect(box, self.photo.size)
         self.focus = ((self.rect[0] + self.rect[2]) / 2,
                       (self.rect[1] + self.rect[3]) / 2) if self.rect else None
         self.move = move
+        self.style = style
         left, top, right, bottom = safe_rect("9:16")
         face, lines = fit_text(text, style.display, right - left, range(104, 59, -4), 3)
         height = block_height(face, lines)
         low_box = (left, bottom - height, right, bottom)
         high_top = top + 90  # under the wordmark
         high_box = (left, high_top, right, high_top + height)
-        low_aim = (high_top + low_box[1] - 40) / 2 / SIZE[1]
-        high_aim = (high_box[3] + 40 + bottom) / 2 / SIZE[1]
-        words_box, side, self.aim = low_box, "bottom", low_aim
-        if self._under(high_box, high_aim) < self._under(low_box, low_aim) - 0.05:
-            words_box, side, self.aim = high_box, "top", high_aim
+        top_strip = high_box[3] + 56
+        options = [  # (words, where they sit, top of the photo, where the product aims)
+            (low_box, "bottom", 0, (high_top + low_box[1] - 40) / 2 / SIZE[1]),
+            (high_box, "top", 0, (high_box[3] + 40 + bottom) / 2 / SIZE[1]),
+        ]
+        # Under the strip, the product aims at the open photo above the Reels buttons; a big
+        # one aims lower, so that none of it slips up behind the strip.
+        options += [(high_box, "strip", top_strip, aim)
+                    for aim in ((bottom - top_strip) / 2 / (SIZE[1] - top_strip), 0.4, 0.5)]
+        scores = [self._misfit(words, aim, photo_top) for words, _, photo_top, aim in options]
+        pick = 1 if scores[1] < scores[0] - 0.05 else 0
+        under = min(range(2, len(options)), key=lambda i: (round(scores[i], 2), i))
+        if scores[pick] > FIT_COVERED and scores[under] < scores[pick] - 0.02:
+            pick = under
+        elif strip and scores[under] <= max(FIT_COVERED, scores[pick]):
+            pick = under  # the rest of the video is on the strip; this shot fits there too
+        words_box, side, self.top, self.aim = options[pick]
+        self.covered = self._fit(words_box, self.aim, self.top)[0]
+        color = style.on(style.panel) if side == "strip" else style.paper
         step = round(face.size * 1.08)
         y = words_box[1]
         self.lines = []
         for line in lines:
-            self.lines.append(_Line(line, face, style.paper, (left, y)))
+            self.lines.append(_Line(line, face, color, (left, y)))
             y += step
+        self.washes = []
+        if side == "strip":
+            layer = Image.new("RGBA", SIZE, (0, 0, 0, 0))
+            d = ImageDraw.Draw(layer)
+            d.rectangle((0, 0, SIZE[0], self.top), fill=style.panel)
+            d.rectangle((0, self.top - 6, SIZE[0], self.top), fill=style.accent)
+            if style.brand:
+                wordmark(d, style, (left, top), 40, color)
+            self.washes.append(layer)
+            return
         mark_box = (left, top, right, top + 40)
         middle = self.camera(0.5).convert("RGBA")
-        self.washes = []
         washes = ((words_box, side, 0.3),) if side == "top" else \
             ((words_box, "bottom", 0.3), (mark_box, "top", 0.0))
         for rect, edge, start in washes:
@@ -114,21 +144,43 @@ class _Shot:
                 middle = Image.alpha_composite(middle, layer)
                 self.washes.append(layer)
 
-    def _crop(self, progress: float, aim: float | None = None) -> tuple[float, float, float, float]:
+    @property
+    def strip(self) -> bool:
+        """True when the words sit on the brand strip, which carries its own wordmark."""
+        return self.top > 0
+
+    def _crop(self, progress: float, aim: float | None = None,
+              top: int | None = None) -> tuple[float, float, float, float]:
         start, end, drift = self.move
         zoom = start + (end - start) * _ease(progress)
         target = (0.5 + drift * (0.5 - progress), self.aim if aim is None else aim)
-        return crop_box(self.photo.size, SIZE, self.focus, target, zoom)
+        region = (SIZE[0], SIZE[1] - (self.top if top is None else top))
+        return crop_box(self.photo.size, region, self.focus, target, zoom)
 
-    def _under(self, words: tuple[int, int, int, int], aim: float) -> float:
-        """The most of the product the words would cover at any point in the shot."""
+    def _fit(self, words: tuple[int, int, int, int], aim: float,
+             top: int) -> tuple[float, float]:
+        """The most of the product the words cover at any point in the shot, and the least of
+        it in the picture."""
         if self.rect is None:
-            return 0.0
-        return max(covered(_map(self.rect, self._crop(t, aim), (0, 0), SIZE), [words])
-                   for t in (0.0, 0.5, 1.0))
+            return 0.0, 1.0
+        region = (SIZE[0], SIZE[1] - top)
+        placed = [_map(self.rect, self._crop(t, aim, top), (0, top), region)
+                  for t in (0.0, 0.5, 1.0)]
+        return (max(covered(p, [words]) for p in placed),
+                min(shown(p, (0, top, *SIZE)) for p in placed))
+
+    def _misfit(self, words: tuple[int, int, int, int], aim: float, top: int) -> float:
+        under, seen = self._fit(words, aim, top)
+        return under + 2 * (1 - seen)
 
     def camera(self, progress: float) -> Image.Image:
-        return self.photo.resize(SIZE, Image.Resampling.BILINEAR, box=self._crop(progress))
+        region = (SIZE[0], SIZE[1] - self.top)
+        photo = self.photo.resize(region, Image.Resampling.BILINEAR, box=self._crop(progress))
+        if not self.top:
+            return photo
+        frame = Image.new("RGB", SIZE, self.style.panel)
+        frame.paste(photo, (0, self.top))
+        return frame
 
 
 class Cut:
@@ -141,16 +193,24 @@ class Cut:
             raise ValueError("A video needs at least one scene")
         lines = [story.hook or headline, story.benefit or headline, story.proof or headline]
         self.style = style
-        self.shots = [
-            _Shot(scenes[i % len(scenes)], boxes[i % len(boxes)] if boxes else None, MOVES[i],
-                  lines[i], style)
-            for i in range(3)
-        ]
+        self.shots = [self._shot(scenes, boxes, lines, i, style) for i in range(3)]
+        if any(shot.strip for shot in self.shots):  # one caption style for the whole video
+            self.shots = [shot if shot.strip else self._shot(scenes, boxes, lines, i, style, True)
+                          for i, shot in enumerate(self.shots)]
         self.mark = Image.new("RGBA", SIZE, (0, 0, 0, 0))
         if style.brand:
             left, top, _, _ = safe_rect("9:16")
             wordmark(ImageDraw.Draw(self.mark), style, (left, top), 40, style.paper)
         self.card = _EndCard(product, story.cta or style.cta, style, offer, sign_off)
+
+    @staticmethod
+    def _shot(scenes, boxes, lines, i: int, style: Style, strip: bool = False) -> _Shot:
+        return _Shot(scenes[i % len(scenes)], boxes[i % len(boxes)] if boxes else None, MOVES[i],
+                     lines[i], style, strip)
+
+    def covered(self) -> list[float]:
+        """For each shot, the most of the product its caption covers."""
+        return [shot.covered for shot in self.shots]
 
     def _scene(self, i: int, t: int) -> Image.Image:
         shot = self.shots[i]
@@ -158,7 +218,8 @@ class Cut:
         frame = shot.camera(t / length).convert("RGBA")
         for layer in shot.washes:
             frame.alpha_composite(layer)
-        frame.alpha_composite(self.mark)
+        if not shot.strip:
+            frame.alpha_composite(self.mark)
         out = 1 - max(0, t - (length - FADE)) / FADE
         for k, line in enumerate(shot.lines):
             line.draw(frame, _ease((t - 6 - k * STAGGER) / RISE) * out)

@@ -607,34 +607,47 @@ def _set_panel(d: ImageDraw.ImageDraw, style: Style, x: int, y: int, mark_size: 
 
 def _card(photo: Image.Image, rect, focus, words: str, style: Style) -> Design:
     """9:16 panel: the photo full bleed, the words on a brand-colour card at the bottom of the safe
-    zone (or the top, when the product sits low). The product sits in the open photo."""
+    zone (or the top, when the product sits low). The product sits in the open photo. When the
+    product is too big for either, the words go on a brand-colour strip across the top and the
+    photo runs below it."""
     size = CREATIVE_SIZES["9:16"]
-    _, top, _, bottom = safe_rect("9:16")
+    left, top, _, bottom = safe_rect("9:16")
     inset, pad = 40, 48
     x = inset + pad
     face, lines, head_h, cta_size, mark_size, content = _panel_content(
         "9:16", words, style, size[0] - 2 * x)
-    frame = (0, 0, *size)
+    strip = top + content + pad
+    options = []  # (rank, card, photo top, aim)
+    card = (inset, bottom - content - pad, size[0] - inset, bottom + pad)
+    options.append((0, card, 0, (top + card[1]) / 2 / size[1]))
+    card = (inset, top - pad, size[0] - inset, top + content + pad)
+    options.append((1, card, 0, (card[3] + bottom) / 2 / size[1]))
+    # Under the strip a big product aims lower too, so none of it slips up behind the strip.
+    options += [(2, None, strip, aim) for aim in ((bottom - strip) / 2 / (size[1] - strip), 0.4,
+                                                  0.5)]
     best = None
-    for side in ("bottom", "top"):
-        if side == "bottom":
-            card = (inset, bottom - content - pad, size[0] - inset, bottom + pad)
-            free = (top, card[1])
-        else:
-            card = (inset, top - pad, size[0] - inset, top + content + pad)
-            free = (card[3], bottom)
+    for rank, card, photo_top, aim in options:
+        region = (size[0], size[1] - photo_top)
         for zoom in (1.0, 1.15, 1.3):
-            target = (0.5, (free[0] + free[1]) / 2 / size[1])
-            crop = crop_box(photo.size, size, focus, target, zoom)
-            placed = _map(rect, crop, (0, 0), size) if rect else None
-            seen = max(0.0, shown(placed, frame) - covered(placed, [card]))
-            score = (round(1 - seen, 2), side != "bottom", zoom)
+            crop = crop_box(photo.size, region, focus, (0.5, aim), zoom)
+            placed = _map(rect, crop, (0, photo_top), region) if rect else None
+            seen = shown(placed, (0, photo_top, *size))
+            if card:
+                seen = max(0.0, seen - covered(placed, [card]))
+            score = (round(1 - seen, 2), rank, zoom)
             if best is None or score < best[0]:
-                best = (score, card, crop, placed, seen)
-    _, card, crop, placed, seen = best
-    canvas = photo.convert("RGB").resize(size, Image.Resampling.LANCZOS, box=crop).convert("RGBA")
+                best = (score, card, photo_top, crop, placed, seen)
+    _, card, photo_top, crop, placed, seen = best
+    region = (size[0], size[1] - photo_top)
+    canvas = Image.new("RGBA", size, (*style.panel, 255))
+    canvas.paste(photo.convert("RGB").resize(region, Image.Resampling.LANCZOS, box=crop),
+                 (0, photo_top))
     d = ImageDraw.Draw(canvas)
-    d.rounded_rectangle(card, radius=32, fill=style.panel)
-    drawn = _set_panel(d, style, x, card[1] + pad, mark_size, face, lines, head_h, cta_size)
+    if card:
+        d.rounded_rectangle(card, radius=32, fill=style.panel)
+        drawn = _set_panel(d, style, x, card[1] + pad, mark_size, face, lines, head_h, cta_size)
+    else:
+        d.rectangle((0, photo_top - 6, size[0], photo_top), fill=style.accent)
+        drawn = _set_panel(d, style, left, top, mark_size, face, lines, head_h, cta_size)
     low = contrast(style.on(style.panel), style.panel)
     return Design(canvas.convert("RGB"), "panel", placed, tuple(drawn), low, seen if rect else 1.0)
