@@ -62,9 +62,12 @@ def copy(**update):
             Claim(text="42 people started", evidence_ids=["ev-d7-test_1-readout"], source_urls=[])
         ],
         scenes=[
-            Scene(angle="Sunrise", prompt="A bright living room at sunrise, empty floor space"),
-            Scene(angle="Lunch break", prompt="A tidy home office at midday, clear floor"),
-            Scene(angle="Evening", prompt="A cosy bedroom corner in lamp light, empty rug"),
+            Scene(angle="Sunrise", prompt="A bright living room at sunrise, empty floor space",
+                  layout="band", words="Done before your coffee cools"),
+            Scene(angle="Lunch break", prompt="A tidy home office at midday, clear floor",
+                  layout="panel", words="Ten minutes. Then lunch."),
+            Scene(angle="Evening", prompt="A cosy bedroom corner in lamp light, empty rug",
+                  layout="poster", words="Show up again tomorrow"),
         ],
         video=Storyboard(hook="Ten minutes a day", benefit="Fits before work",
                          proof="Free 7-day trial", cta="Try It"),

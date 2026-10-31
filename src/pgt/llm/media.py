@@ -1,4 +1,4 @@
-"""Image models for the Creative Producer: Muse Image backgrounds and SAM 3.1 segmentation.
+"""Image models for the Creative Producer: Muse Image scenes and SAM 3.1 segmentation.
 
 Each call is logged as a model.call event and charged to the spend meter, like text calls.
 """
@@ -49,6 +49,38 @@ class MediaClient:
                 started,
                 ok,
                 {"prompt": prompt},
+            )
+
+    async def scene(
+        self, scope: Scope, role: str, prompt: str, reference: Image.Image
+    ) -> Image.Image:
+        """Render one 2:3 photograph with the product from `reference` inside it. The prompt
+        calls the reference "@Image1"."""
+        scope.meter.check(role, scope.loop_id)
+        started = perf_counter()
+        ok = False
+        try:
+            result = await self.client.images.edit(
+                model=self.image_model,
+                prompt=prompt,
+                n=1,
+                image=("product.png", png_bytes(reference.convert("RGB")), "image/png"),
+                size="1024x1536",
+                response_format="b64_json",
+            )
+            image = Image.open(BytesIO(base64.b64decode(result.data[0].b64_json)))
+            image.load()
+            ok = True
+            return image.convert("RGB")
+        finally:
+            self._log(
+                scope,
+                role,
+                self.image_model,
+                IMAGE_PRICE if ok else 0.0,
+                started,
+                ok,
+                {"prompt": prompt, "reference": True},
             )
 
     async def segment(self, scope: Scope, role: str, image: Image.Image, concept: str) -> list[Box]:

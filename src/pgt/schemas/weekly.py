@@ -87,9 +87,25 @@ class Claim(_Out):
     source_urls: list[str]
 
 
+SceneLayout = Literal["band", "panel", "poster", "offer"]
+
+
 class Scene(_Out):
+    """One shot of the ad. Muse Image renders it with the real product photo as its reference;
+    layout code sets the words over it."""
+
     angle: str  # what this picture tries, in a few words, e.g. "Dark evening walk"
-    prompt: str  # background scene only: no text, no product, no people's bodies
+    prompt: str  # the photograph: who, doing what, where, camera, light; the product in it
+    layout: SceneLayout  # how code sets the words: see the Producer's instructions
+    words: str  # the line set on this picture, 40 characters at most
+
+    @model_validator(mode="before")
+    @classmethod
+    def _older_scene(cls, data):
+        """Scenes saved before layouts were background prompts with no words of their own."""
+        if isinstance(data, dict) and "layout" not in data:
+            data = {**data, "layout": "band", "words": data.get("words", "")}
+        return data
 
 
 class Storyboard(_Out):
@@ -103,9 +119,11 @@ class Storyboard(_Out):
 
 
 class CreativeCopy(_Out):
-    """Creative Producer: the words of one ad, three background scenes and a video storyboard."""
+    """Creative Producer: the concept and words of one ad, three art-directed shots and a video
+    storyboard."""
 
     name: str  # short ad name, e.g. "Progress photo v1"
+    concept: str  # the one idea behind the ad, as an art director would pitch it
     headline: str
     primary_text: str
     description: str
@@ -117,6 +135,8 @@ class CreativeCopy(_Out):
     @classmethod
     def _older_copy(cls, data):
         """Copy saved before ads had three scenes carries one image_prompt and no video."""
+        if isinstance(data, dict) and "concept" not in data:
+            data = {**data, "concept": ""}
         if isinstance(data, dict) and "image_prompt" in data and "scenes" not in data:
             data = dict(data)
             prompt = data.pop("image_prompt")

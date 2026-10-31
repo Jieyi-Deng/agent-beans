@@ -11,11 +11,13 @@ import base64
 import json
 from io import BytesIO
 
-from PIL import Image
+from PIL import Image, ImageStat
 
 from pgt.creative.compose import (
     make_demo_product_shot,
+    matte,
     offline_background,
+    place_product,
     png_bytes,
     product_box,
 )
@@ -195,8 +197,12 @@ def _sells_online(body: dict) -> bool:
     return '\\"result_name\\": \\"purchase\\"' in json.dumps(body)
 
 
+DEMO_BACKDROP = (242, 240, 234)  # corner colour of the drawn demo phone shot
+
+
 def _segment(body: dict) -> RawText:
-    """SAM 3.1 stand-in: the phone in the demo product shot, or the product in a studio photo."""
+    """SAM 3.1 stand-in: the phone in the demo product shot, or whatever stands out from the
+    backdrop in a studio photo or an offline scene."""
     image, concept = None, "phone"
     for item in body.get("input", []):
         for part in item.get("content", []) if isinstance(item, dict) else []:
@@ -207,18 +213,44 @@ def _segment(body: dict) -> RawText:
             url = part.get("image_url", "")
             if url.startswith("data:image/"):
                 image = Image.open(BytesIO(base64.b64decode(url.split(",", 1)[1])))
-    if image is not None and concept != "phone":
-        box = product_box(image)
-    else:
+    demo = image is None or (
+        image.width == image.height and image.convert("RGB").getpixel((0, 0)) == DEMO_BACKDROP
+    )
+    if demo:
         _, box = make_demo_product_shot(image.width if image is not None else 1600)
+    else:
+        box = product_box(image)
     return RawText(
         f"<0f>0<|box;x1={box.x1};y1={box.y1};x2={box.x2};y2={box.y2};w={box.w};h={box.h}|>"
     )
 
 
 def offline_image(body: dict) -> bytes:
-    """Muse Image stand-in: a deterministic gradient per prompt."""
+    """Muse Image stand-in: a deterministic gradient per prompt, or for an edit, the reference
+    product set large on a plain prompt-seeded backdrop."""
+    if body.get("image"):
+        return png_bytes(_offline_scene(body))
     return png_bytes(offline_background(body.get("prompt", "")))
+
+
+def _offline_scene(body: dict) -> Image.Image:
+    width, height = (int(v) for v in str(body.get("size") or "1024x1536").split("x"))
+    with Image.open(BytesIO(body["image"])) as reference:
+        reference = reference.convert("RGB")
+    if reference.getpixel((0, 0)) == DEMO_BACKDROP and reference.width == reference.height:
+        _, box = make_demo_product_shot(reference.width)
+    else:
+        box = product_box(reference)
+    product = matte(reference, box)
+    # A flat backdrop far from the product's own brightness, so the SAM stand-in finds it.
+    seed = offline_background(body.get("prompt", ""), (8, 8)).getpixel((4, 4))
+    light = ImageStat.Stat(product.convert("L")).mean[0] < 128
+    tone = tuple(190 + v // 4 for v in seed) if light else tuple(20 + v // 6 for v in seed)
+    scene = Image.new("RGBA", (width, height), (*tone, 255))
+    scale = min(0.5 * width / product.width, 0.42 * height / product.height)
+    product = product.resize((round(product.width * scale), round(product.height * scale)))
+    place_product(scene, product, ((width - product.width) // 2, round(0.24 * height)))
+    return scene.convert("RGB")
 
 
 def _weekly_brief(inputs: dict) -> WeeklyBrief:
@@ -233,6 +265,7 @@ def _weekly_brief(inputs: dict) -> WeeklyBrief:
     )
 
 
+LAYOUTS = ("band", "panel", "poster")
 APP = {
     "product": "phone",
     "query": "fitness app ads",
@@ -248,6 +281,7 @@ APP = {
         ("Evening wind-down", ("A cosy bedroom corner in the evening, a folded towel and a mug "
          "of tea on a low shelf, empty rug in the lower middle, lamp light")),
     ),
+    "words": ("Ten minutes. Then coffee.", "Show up again tomorrow"),
     "video": ("Ten minutes. Your living room.", "Fits before work or after", "Free 7-day trial",
               "Try It"),
 }
@@ -267,6 +301,7 @@ STORE = {
         ("Autumn street", ("A quiet tree-lined street in autumn, warm low sun, clean pavement in "
          "the lower middle")),
     ),
+    "words": ("Clips on in seconds", "Free shipping over $50"),
     "video": ("The walk you both look forward to", "Spreads the pull across the chest",
               "Free shipping over $50", "Shop Now"),
 }
@@ -431,8 +466,13 @@ def _creative_copy(
         primary_text=flavor["primary_text"],
         description=flavor["description"],
         claims=[Claim(text=brief["key_message"], evidence_ids=evidence_ids, source_urls=[])],
-        scenes=[Scene(angle=angle, prompt=f"{prompt}, mood: {brief['angle']}")
-                for angle, prompt in flavor["scenes"]],
+        concept=f"{brief['angle']}: {brief['key_message']}",
+        scenes=[Scene(angle=angle, prompt=f"{prompt}, the {brief.get('product') or flavor['product']} "
+                      f"from the reference photo, mood: {brief['angle']}", layout=layout,
+                      words=words)
+                for (angle, prompt), layout, words in zip(
+                    flavor["scenes"], LAYOUTS, (brief["hook"][:40], *flavor["words"]),
+                    strict=True)],
         video=Storyboard(hook=hook, benefit=benefit, proof=proof, cta=cta),
     )
 

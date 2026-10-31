@@ -415,8 +415,9 @@ def _made(ws, idx, account, media_dir, record, plans, facts) -> dict:
     versions = [r for r in ws.artifacts.list(kind="CreativeSet") if r.key == record.key]
     prompts = {p for v in versions for p in _scene_prompts(v.content.get("ad_copy", {}))}
     sam = _step_model(_calls(ws, loop, SAM_MODEL))
+    # Scene shots log the full shot note, which carries the scene prompt inside it.
     image = _step_model([e for e in _calls(ws, loop, IMAGE_MODEL)
-                         if e.payload.get("prompt") in prompts])
+                         if any(p and p in (e.payload.get("prompt") or "") for p in prompts)])
     text_calls = [e for e in _calls(ws, loop)
                   if e.payload["model"] not in (SAM_MODEL, IMAGE_MODEL)]
     text_models = sorted({e.payload["model"] for e in text_calls})
@@ -440,7 +441,8 @@ def _made(ws, idx, account, media_dir, record, plans, facts) -> dict:
          "model": {"model": " + ".join(m.replace("meta-models/", "") for m in text_models),
                    "provider": provider(text_models[0]), "calls": None, "cost": None}
          if text_models else None, "final": False},
-        {"title": "Three scenes, three sizes each", "model": image, "final": False,
+        {"title": "Three scenes shot with the product, laid out in three sizes", "model": image,
+         "final": False,
          "sub": " · ".join(s.get("angle", "") for s in copy.get("scenes", []))
          or copy.get("image_prompt", "")},
     ]

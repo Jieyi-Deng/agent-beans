@@ -58,8 +58,13 @@ class CreativeKit(BaseModel):
     look: str  # light, settings, palette, camera
     props: list[str]  # things that may appear in a scene
     avoid: list[str]  # things that must never appear in a scene
-    colors: dict[str, str]  # hex: "brand" (end card), "ink" (text), "paper" (light text)
+    colors: dict[str, str]  # hex: "brand" (panels), "ink" (dark text), "paper" (light text),
+    # "accent" (buttons and badges)
     sign_off: str  # brand line on the video end card
+    # The brand's type, as "<file in creative/fonts>:<weight>": "display" for headlines and the
+    # wordmark, "text" for buttons and small print. Liberation Sans when not set.
+    fonts: dict[str, str] = {}
+    offer_badge: str = ""  # the offer in a few words, for the badge layout
 
 
 class Scenario(BaseModel):
@@ -184,8 +189,8 @@ def fitness_app_kit() -> CreativeKit:
             what_it_is="The Pallas Fit app on a phone, open on today's 10-minute workout",
             selling_points=["10-minute workouts", "No equipment", "Daily streaks",
                             "7-day free trial"],
-            how_to_show="The phone stands upright, screen to camera, as if propped on a shelf "
-            "or a yoga mat; it is the only device in the frame",
+            how_to_show="In someone's hand or propped beside them mid-workout, screen "
+            "readable and turned toward the camera; it is the only device in the frame",
         )],
         personas=[
             Persona(who="Office worker, 31, home by 7pm", moment="Scrolling on the sofa after "
@@ -201,16 +206,19 @@ def fitness_app_kit() -> CreativeKit:
         "lasts past the holidays.",
         offer="7-day free trial, cancel any time in the app",
         cta_buttons=["Install Now", "Sign Up", "Try It"],
-        look="Warm, lived-in apartment corners at golden hour or early morning; soft window "
-        "light; muted sage, cream and warm wood; a calm, uncluttered frame shot at eye level "
-        "with a shallow depth of field and clear space in the middle for the phone",
+        look="Candid lifestyle photography in warm, lived-in apartments at golden hour or "
+        "early morning: real people in comfortable athleisure, mid-movement or just finished, "
+        "relaxed rather than posed; soft window light; muted sage, cream and warm wood; 35mm, "
+        "eye level, shallow depth of field, gentle film grain",
         props=["rolled yoga mat", "water bottle", "running shoes by the door", "houseplant",
                "folded towel", "window with morning light", "small rug", "mug of tea"],
-        avoid=["people or body parts", "gym machines", "scales or measuring tapes",
-               "food or diet items", "text, logos or screens", "other phones or devices",
-               "before/after framing"],
-        colors={"brand": "#2F5D50", "ink": "#16211D", "paper": "#F6F2EA"},
+        avoid=["gym machines", "scales or measuring tapes", "food or diet items",
+               "body-focused framing (abs, waists, shirtless)", "before/after framing",
+               "text or logos in the scene", "other phones or devices", "looking into the lens"],
+        colors={"brand": "#2F5D50", "ink": "#16211D", "paper": "#F6F2EA", "accent": "#E9B872"},
         sign_off="Ten minutes counts.",
+        fonts={"display": "PlusJakartaSans:800", "text": "PlusJakartaSans:600"},
+        offer_badge="7 days free",
     )
 
 
@@ -365,16 +373,18 @@ def pet_store_kit() -> CreativeKit:
         "holiday gift shopping. People buy early to beat shipping delays.",
         offer="Free shipping on orders over $50",
         cta_buttons=["Shop Now", "Learn More"],
-        look="Natural daylight, real homes and neighbourhood streets; autumn tones of rust, "
-        "oat and deep green; crisp, editorial product photography with soft shadows and a "
-        "clean surface in the middle of the frame where the product sits",
+        look="Editorial lifestyle photography in natural daylight: real homes and "
+        "neighbourhood streets, pets caught mid-moment; autumn tones of rust, oat and deep "
+        "green; 35-50mm, shallow depth of field, soft shadows, warm film colour",
         props=["leash hook by the front door", "autumn leaves on a path", "knit throw",
                "wooden floor", "window light", "dog bed", "cat tree", "kraft gift box"],
         avoid=["animals in distress", "vets, clinics or medical items",
                "text, logos or price tags", "other brands' products",
                "a second harness or fountain", "people's faces"],
-        colors={"brand": "#B4532A", "ink": "#1F1A17", "paper": "#FBF6EE"},
+        colors={"brand": "#B4532A", "ink": "#1F1A17", "paper": "#FBF6EE", "accent": "#2E4A3B"},
         sign_off="Gear for calmer days with your pet.",
+        fonts={"display": "Fraunces:600", "text": "DMSans:600"},
+        offer_badge="Free shipping over $50",
     )
 
 

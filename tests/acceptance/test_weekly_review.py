@@ -16,9 +16,12 @@ from pgt.schemas import TestPlan as Plan
 
 def three_scenes():
     return [
-        Scene(angle="Morning", prompt="A bright living room at sunrise with open floor space"),
-        Scene(angle="Midday", prompt="A tidy home office corner at midday, clear floor"),
-        Scene(angle="Evening", prompt="A cosy bedroom corner in lamp light, empty rug"),
+        Scene(angle="Morning", prompt="A bright living room at sunrise with open floor space",
+              layout="band", words="Done before your coffee cools"),
+        Scene(angle="Midday", prompt="A tidy home office corner at midday, clear floor",
+              layout="panel", words="Ten minutes. Then lunch."),
+        Scene(angle="Evening", prompt="A cosy bedroom corner in lamp light, empty rug",
+              layout="poster", words="Show up again tomorrow"),
     ]
 
 

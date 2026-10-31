@@ -20,18 +20,19 @@ from PIL import Image
 from pydantic_ai.models import Model
 
 from pgt.creative.compose import (
-    INK,
+    Box,
     cutout,
     make_demo_product_shot,
     matte,
     png_bytes,
-    render_creative,
     save_png,
 )
-from pgt.creative.video import Cut, EndCard, contact_sheet, encode, hex_rgb
+from pgt.creative.design import Style, compose
+from pgt.creative.video import Cut, contact_sheet, encode
 from pgt.harness.creative_checks import (
     allocate_budget,
     check_copy,
+    check_design,
     check_images,
     check_plan,
     check_research,
@@ -47,7 +48,7 @@ from pgt.roles.analyst import run_answer, run_weekly_analyst
 from pgt.roles.growth_lead import missing_facts, run_intake, run_plan
 from pgt.roles.metrics import Signal, week_days, weekly_signals
 from pgt.roles.operator import apply_change_set
-from pgt.roles.producer import run_producer
+from pgt.roles.producer import run_producer, shot_prompt
 from pgt.roles.reviewer import review_creative, review_findings
 from pgt.roles.strategist import run_research
 from pgt.sandbox import SandboxAccount, product_names, product_photo
@@ -455,6 +456,7 @@ async def produce_week(
         return test.brief.product if test.brief.product in names else names[0]
 
     cutouts: dict[str, Image.Image] = {}
+    references: dict[str, Image.Image] = {}
     fresh = [t for t in plan.tests if note or _reusable(ws, week, t.test_id) is None]
     for concept in dict.fromkeys(shown(t) for t in fresh):
         shot = product_shot if concept == names[0] else None
@@ -463,6 +465,7 @@ async def produce_week(
         if shot is None:
             shot, _ = make_demo_product_shot()
         save_png(shot, media_dir / shot_file(concept, names[0]))
+        references[concept] = shot.convert("RGB")
         try:
             boxes = await media.segment(scope, "producer", shot, concept)
         except ValueError:
@@ -473,7 +476,7 @@ async def produce_week(
         except ValueError:
             # Busy photo: fall back to the box itself with rounded corners.
             cutouts[concept] = cutout(shot, boxes[0])
-    backgrounds: dict[str, Image.Image] = {}
+    photos: dict[tuple[str, str], tuple[Image.Image, Box | None]] = {}
     kit = creative_kit(account)
     allowed_numbers = fact_numbers(facts, kit)
 
@@ -503,9 +506,10 @@ async def produce_week(
                 scope, model, facts, fv, test, insights, ask, issues, kit
             )
             creative_id = f"{test.test_id}-c{attempt}"
-            images, video, sheet = await _render(
-                scope, media, ad_copy, cutouts[shown(test)], backgrounds, media_dir / creative_id,
-                kit,
+            concept = shown(test)
+            images, video, sheet, laid_out = await _render(
+                scope, media, ad_copy, concept, references[concept], cutouts[concept], photos,
+                media_dir / creative_id, kit,
             )
             creative = CreativeSet(
                 creative_id=creative_id,
@@ -529,6 +533,7 @@ async def produce_week(
                                 kit.cta_buttons if kit else None)
             issues += check_images(images, variants=len(ad_copy.scenes) or 1)
             issues += check_video(video)
+            issues += check_design(concept, laid_out)
             by = "code"
             if not issues:
                 review = await review_creative(
@@ -631,37 +636,50 @@ async def _render(
     scope: Scope,
     media: MediaClient,
     ad_copy: CreativeCopy,
+    concept: str,
+    reference: Image.Image,
     product: Image.Image,
-    backgrounds: dict[str, Image.Image],
+    photos: dict[tuple[str, str], tuple[Image.Image, Box | None]],
     folder: Path,
     kit: CreativeKit | None = None,
-) -> tuple[list[CreativeImage], CreativeVideo | None, bytes]:
-    """One Muse Image background per scene (cached per prompt), each scene in the three
-    placement sizes, then the 10-second video from the same scenes. Also returns the contact
-    sheet the Reviewer looks at: the square image of each scene and the video's shots."""
-    prompts = [scene.prompt for scene in ad_copy.scenes]
-    missing = [p for p in dict.fromkeys(prompts) if p not in backgrounds]
-    painted = await asyncio.gather(
-        *(media.background(scope, "producer", prompt) for prompt in missing)
-    )
-    backgrounds.update(zip(missing, painted, strict=True))
-    scenes = [backgrounds[p] for p in prompts]
+) -> tuple[list[CreativeImage], CreativeVideo | None, bytes, list]:
+    """Each scene as a Muse Image photograph with the real product in it (the product photo is
+    the reference; cached per prompt), where SAM 3.1 finds the product; then each scene laid out
+    in the three placement sizes and the 10-second video from the same shots. Also returns the
+    contact sheet the Reviewer looks at and every laid-out picture for the design checks."""
+    prompts = [shot_prompt(scene, concept, kit) for scene in ad_copy.scenes]
+    missing = [p for p in dict.fromkeys(prompts) if (concept, p) not in photos]
 
-    brand = kit.brand if kit else None
-    ink = hex_rgb(kit.colors.get("ink"), INK) if kit else INK
-    images, squares = [], []
-    for variant, background in enumerate(scenes, start=1):
+    async def shoot(prompt: str) -> tuple[Image.Image, Box | None]:
+        photo = await media.scene(scope, "producer", prompt, reference)
+        try:
+            boxes = await media.segment(scope, "producer", photo, concept)
+        except ValueError:
+            return photo, None
+        return photo, boxes[0]
+
+    shot = await asyncio.gather(*(shoot(prompt) for prompt in missing))
+    photos.update({(concept, p): result for p, result in zip(missing, shot, strict=True)})
+    scenes = [photos[(concept, p)] for p in prompts]
+
+    style = Style.from_kit(kit, ad_copy.video.cta)
+    images, squares, laid_out = [], [], []
+    for variant, (scene, (photo, box)) in enumerate(zip(ad_copy.scenes, scenes, strict=True),
+                                                     start=1):
         for ratio, (width, height) in CREATIVE_SIZES.items():
-            rendered = render_creative(background, product, ad_copy.headline, ratio, brand, ink)
+            design = compose(photo, box, ratio, scene.layout, scene.words or ad_copy.headline,
+                             style)
             path = folder / f"v{variant}-{ratio.replace(':', 'x')}.png"
-            digest = save_png(rendered.image, path)
+            digest = save_png(design.image, path)
             images.append(CreativeImage(ratio=ratio, width=width, height=height, path=str(path),
                                         sha256=digest, variant=variant))
+            laid_out.append((variant, ratio, design))
             if ratio == "1:1":
-                squares.append(rendered.image)
+                squares.append(design.image)
 
-    card = (EndCard(kit.brand, kit.offer, kit.sign_off, kit.colors) if kit else EndCard())
-    cut = Cut(scenes, product, ad_copy.video, ad_copy.headline, card)
+    cut = Cut([photo for photo, _ in scenes], [box for _, box in scenes], product,
+              ad_copy.video, ad_copy.headline, style, kit.offer if kit else "",
+              kit.sign_off if kit else "")
     video = await asyncio.to_thread(encode, cut, folder / "video.mp4")
     if video is None:
         scope.ws.events.append(
@@ -669,8 +687,8 @@ async def _render(
             {"folder": str(folder), "reason": "ffmpeg is not installed"},
             loop_id=scope.loop_id,
         )
-    sheet = contact_sheet(squares, cut.keyframes())
-    return images, video, png_bytes(sheet)
+    sheet = contact_sheet(squares, cut.keyframes(), reference)
+    return images, video, png_bytes(sheet), laid_out
 
 
 def _question_ids(scope: Scope, task_id: str) -> list[str]:

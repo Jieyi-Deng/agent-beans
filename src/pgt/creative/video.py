@@ -1,9 +1,10 @@
-"""The 10-second 9:16 ad video, assembled in code from the ad's three scenes.
+"""The 10-second 9:16 ad video, assembled in code from the ad's three shots.
 
 Meta's model API has no video model, so nothing here is generated video. The Producer writes a
-storyboard; Muse Image paints the three scenes; SAM 3.1 finds the real product. This module lays
-the storyboard lines over the scenes, adds an end card with the product, the offer and the
-button, moves the camera slowly and cross-fades between shots, then encodes an MP4 with ffmpeg.
+storyboard; Muse Image renders the three shots with the real product in them; SAM 3.1 finds the
+product. This module moves the camera toward the product in each shot, slides the storyboard
+lines in over a wash that keeps them readable, cross-fades between shots and ends on a packshot
+card with the offer and the button, all in the brand's type. ffmpeg encodes the MP4.
 """
 
 from __future__ import annotations
@@ -11,19 +12,24 @@ from __future__ import annotations
 import hashlib
 import shutil
 import subprocess
-from dataclasses import dataclass, field
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw
 
-from pgt.creative.compose import (
-    INK,
-    SAFE_MARGINS,
-    draw_lines,
-    fit_headline,
-    font,
-    place_product,
-    scrim,
+from pgt.creative.compose import Box, place_product
+from pgt.creative.design import (
+    Style,
+    block_height,
+    crop_box,
+    draw_block,
+    fit_text,
+    pill,
+    pill_size,
+    product_rect,
+    safe_rect,
+    type_face,
+    wash_for,
+    wordmark,
 )
 from pgt.schemas import CreativeVideo, Storyboard
 
@@ -33,200 +39,192 @@ SECONDS = 10
 # Shot lengths in frames: hook 0-3 s, benefit 3-6 s, proof 6-8.5 s, end card 8.5-10 s.
 SHOTS = (90, 90, 75, 45)
 FADE = 9  # frames of cross-fade at each cut (0.3 s)
-PUSH = 0.05  # how far the camera moves in over one shot
+RISE = 12  # frames a line takes to slide and fade in
+STAGGER = 4  # frames between lines
+LIFT = 36  # pixels a line slides up as it comes in
+# The camera in each shot: (zoom at start, zoom at end, sideways drift as a share of the frame).
+MOVES = ((1.0, 1.1, 0.0), (1.12, 1.12, 0.08), (1.12, 1.02, 0.0))
 
 
-@dataclass
-class EndCard:
-    """What the last shot says. Taken from the advertiser's creative kit when there is one."""
-
-    brand: str | None = None
-    offer: str = ""
-    sign_off: str = ""
-    colors: dict[str, str] = field(default_factory=dict)
+def _ease(t: float) -> float:
+    t = min(1.0, max(0.0, t))
+    return 1 - (1 - t) ** 3
 
 
-def hex_rgb(value: str | None, default: tuple[int, int, int]) -> tuple[int, int, int]:
-    if not value or len(value.lstrip("#")) != 6:
-        return default
-    raw = value.lstrip("#")
-    return tuple(int(raw[i:i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
+class _Line:
+    """One set line of a storyboard caption, kept as its own layer so it can move."""
+
+    def __init__(self, text: str, face, color, xy: tuple[int, int]) -> None:
+        width = round(face.getlength(text)) + 8
+        height = block_height(face, [text]) + 8
+        self.layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw_block(ImageDraw.Draw(self.layer), [text], face, (0, 0), color)
+        self.xy = xy
+
+    def draw(self, frame: Image.Image, amount: float) -> None:
+        if amount <= 0:
+            return
+        layer = self.layer
+        if amount < 1:
+            layer = layer.copy()
+            layer.putalpha(layer.getchannel("A").point(lambda v: round(v * amount)))
+        frame.alpha_composite(layer, (self.xy[0], self.xy[1] + round(LIFT * (1 - amount))))
 
 
-def end_card(product: Image.Image, cta: str, card: EndCard) -> Image.Image:
-    """Light card: brand name, the product, the offer, a button and the sign-off, all inside
-    the 9:16 safe area so the Reels buttons cover none of it."""
-    paper = hex_rgb(card.colors.get("paper"), (246, 242, 234))
-    ink = hex_rgb(card.colors.get("ink"), INK)
-    brand = hex_rgb(card.colors.get("brand"), (40, 72, 64))
-    image = Image.new("RGBA", SIZE, (*paper, 255))
-    draw = ImageDraw.Draw(image)
-    width, height = SIZE
-    top, right, bottom, left = SAFE_MARGINS["9:16"]
-    middle = width // 2
-
-    # Lay out from the bottom of the safe area up; the product gets the room that is left.
-    blocks: list[tuple[str, object]] = []
-    y = height - bottom
-    if card.sign_off:
-        face = font(36, bold=False)
-        y -= sum(face.getmetrics())
-        blocks.append(("sign_off", (face, y)))
-        y -= 36
-    if cta:
-        face = font(46, bold=True)
-        pill_h = 104
-        y -= pill_h
-        blocks.append(("cta", (face, y, pill_h)))
-        y -= 40
-    if card.offer:
-        face, lines = fit_headline(card.offer, width - left - right - 40, sizes=range(60, 35, -4))
-        step = sum(face.getmetrics()) + 8
-        y -= step * len(lines)
-        blocks.append(("offer", (face, lines, y, step)))
-        y -= 24
-    room_bottom = y
-    room_top = top + 20
-    if card.brand:
-        label = font(40, bold=True)
-        draw.text((middle, top + 20), card.brand.upper(), font=label, fill=(*brand, 255),
-                  anchor="mt")
-        room_top += sum(label.getmetrics()) + 40
-
-    scale = min(0.72 * (width - left - right) / product.width,
-                (room_bottom - room_top) / product.height)
-    size = (max(1, int(product.width * scale)), max(1, int(product.height * scale)))
-    shown = product.convert("RGBA").resize(size, Image.Resampling.LANCZOS)
-    place_product(image, shown, ((width - shown.width) // 2,
-                                 room_top + (room_bottom - room_top - shown.height) // 2))
-
-    for kind, spec in blocks:
-        if kind == "sign_off":
-            face, y = spec
-            draw.text((middle, y), card.sign_off, font=face, fill=(*ink, 200), anchor="mt")
-        elif kind == "cta":
-            face, y, pill_h = spec
-            pill_w = int(draw.textlength(cta, font=face) + 120)
-            x0 = middle - pill_w // 2
-            draw.rounded_rectangle((x0, y, x0 + pill_w, y + pill_h), radius=pill_h // 2,
-                                   fill=(*brand, 255))
-            draw.text((middle, y + pill_h // 2), cta, font=face, fill=(255, 255, 255, 255),
-                      anchor="mm")
-        else:
-            face, lines, y, step = spec
-            for line in lines:
-                draw.text((middle, y), line, font=face, fill=(*ink, 255), anchor="mt")
-                y += step
-    return image.convert("RGB")
-
-
-@dataclass
 class _Shot:
-    scene: Image.Image  # the scene, already fitted to the frame
-    words: Image.Image  # transparent layer: brand label and the storyboard line
+    def __init__(self, photo: Image.Image, box: Box | None, move, text: str, style: Style) -> None:
+        self.photo = photo.convert("RGB")
+        rect = product_rect(box, self.photo.size)
+        self.focus = ((rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2) if rect else None
+        self.move = move
+        left, top, right, bottom = safe_rect("9:16")
+        face, lines = fit_text(text, style.display, right - left, range(104, 59, -4), 3)
+        step = round(face.size * 1.08)
+        y = bottom - block_height(face, lines)
+        self.lines = []
+        for line in lines:
+            self.lines.append(_Line(line, face, style.paper, (left, y)))
+            y += step
+        words_box = (left, bottom - block_height(face, lines), right, bottom)
+        mark_box = (left, top, right, top + 40)
+        middle = self.camera(0.5).convert("RGBA")
+        self.washes = []
+        for rect, side, start in ((words_box, "bottom", 0.3), (mark_box, "top", 0.0)):
+            layer, _ = wash_for(middle, rect, side, style.paper, style.ink, start)
+            if layer is not None:
+                middle = Image.alpha_composite(middle, layer)
+                self.washes.append(layer)
+
+    def camera(self, progress: float) -> Image.Image:
+        start, end, drift = self.move
+        zoom = start + (end - start) * _ease(progress)
+        target = (0.5 + drift * (0.5 - progress), 0.45)
+        crop = crop_box(self.photo.size, SIZE, self.focus, target, zoom)
+        return self.photo.resize(SIZE, Image.Resampling.BILINEAR, box=crop)
 
 
 class Cut:
-    """The video as layers. In the three scene shots the product stays where it is while the
-    scene and the words change around it; the end card follows."""
+    """The video as layers: three moving shots with their storyboard lines, then the end card."""
 
-    def __init__(self, scenes: list[Image.Image], product: Image.Image, story: Storyboard,
-                 headline: str, card: EndCard) -> None:
+    def __init__(self, scenes: list[Image.Image], boxes: list[Box | None], product: Image.Image,
+                 story: Storyboard, headline: str, style: Style, offer: str = "",
+                 sign_off: str = "") -> None:
         if not scenes:
             raise ValueError("A video needs at least one scene")
-        width, height = SIZE
-        top, right, bottom, left = SAFE_MARGINS["9:16"]
-        safe_width = width - left - right
-        ink = hex_rgb(card.colors.get("ink"), INK)
         lines = [story.hook or headline, story.benefit or headline, story.proof or headline]
+        self.style = style
+        self.shots = [
+            _Shot(scenes[i % len(scenes)], boxes[i % len(boxes)] if boxes else None, MOVES[i],
+                  lines[i], style)
+            for i in range(3)
+        ]
+        self.mark = Image.new("RGBA", SIZE, (0, 0, 0, 0))
+        if style.brand:
+            left, top, _, _ = safe_rect("9:16")
+            wordmark(ImageDraw.Draw(self.mark), style, (left, top), 40, style.paper)
+        self.card = _EndCard(product, story.cta or style.cta, style, offer, sign_off)
 
-        label = font(34, bold=False) if card.brand else None
-        first = top + (sum(label.getmetrics()) + 16 if label else 0)
-        self.shots: list[_Shot] = []
-        text_bottom = first
-        for i, line in enumerate(lines):
-            words = Image.new("RGBA", SIZE, (0, 0, 0, 0))
-            if label:
-                ImageDraw.Draw(words).text((left, top), card.brand.upper(), font=label,
-                                           fill=(255, 255, 255, 225))
-            face, wrapped = fit_headline(line, safe_width - 8, sizes=range(112, 59, -4))
-            text_bottom = max(text_bottom, draw_lines(words, wrapped, face, (left, first)))
-            scene = ImageOps.fit(scenes[i % len(scenes)].convert("RGB"), SIZE,
-                                 method=Image.Resampling.LANCZOS)
-            self.shots.append(_Shot(scene, words))
+    def _scene(self, i: int, t: int) -> Image.Image:
+        shot = self.shots[i]
+        length = SHOTS[i]
+        frame = shot.camera(t / length).convert("RGBA")
+        for layer in shot.washes:
+            frame.alpha_composite(layer)
+        frame.alpha_composite(self.mark)
+        out = 1 - max(0, t - (length - FADE)) / FADE
+        for k, line in enumerate(shot.lines):
+            line.draw(frame, _ease((t - 6 - k * STAGGER) / RISE) * out)
+        return frame.convert("RGB")
 
-        self.shade = scrim(SIZE, text_bottom + round(0.2 * height), ink)
-        product_top = text_bottom + 60
-        room = height - bottom - product_top
-        scale = min(0.78 * safe_width / product.width, 0.92 * room / product.height)
-        size = (max(1, int(product.width * scale)), max(1, int(product.height * scale)))
-        shown = product.convert("RGBA").resize(size, Image.Resampling.LANCZOS)
-        self.product = Image.new("RGBA", SIZE, (0, 0, 0, 0))
-        place_product(self.product, shown, (left + (safe_width - shown.width) // 2,
-                                            product_top + round((room - shown.height) * 0.55)))
-        self.end = end_card(product, story.cta, card)
-        # Everything that sits still over the moving scene, merged once so each frame does
-        # one composite: the shade and the product, and that plus each shot's words.
-        self.still = Image.alpha_composite(self.shade, self.product)
-        self.covers = [Image.alpha_composite(self.still, shot.words) for shot in self.shots]
-
-    def _scene(self, i: int, progress: float, cover: Image.Image | None = None) -> Image.Image:
-        frame = _zoom(self.shots[i].scene, progress, push_out=i == 0).convert("RGBA")
-        frame.alpha_composite(self.still if cover is None else cover)
-        return frame
-
-    def _with_words(self, frame: Image.Image, i: int, strength: float) -> Image.Image:
-        if strength >= 1:
-            frame.alpha_composite(self.shots[i].words)
-        elif strength > 0:
-            words = self.shots[i].words.copy()
-            words.putalpha(words.getchannel("A").point(lambda v: round(v * strength)))
-            frame.alpha_composite(words)
-        return frame
-
-    def shot(self, i: int, progress: float) -> Image.Image:
+    def frame(self, i: int, t: int) -> Image.Image:
         if i < len(self.shots):
-            return self._scene(i, progress, self.covers[i]).convert("RGB")
-        return _zoom(self.end, progress, push=0.02)
+            return self._scene(i, t)
+        return self.card.frame(t)
 
     def keyframes(self) -> list[Image.Image]:
-        """One still per shot, in order, as the Reviewer sees them."""
-        return [self.shot(i, 0.5) for i in range(len(SHOTS))]
+        """One still per shot, words in place, as the Reviewer sees them."""
+        return [self._still(i) for i in range(len(SHOTS))]
 
-    def _cut(self, i: int, progress: float, mix: float) -> Image.Image:
-        """A frame inside the cut from shot i to shot i + 1. Scenes cross-fade under the
-        product, which stays put; the old words fade out before the new ones fade in. The
-        end card comes in through its own paper colour."""
-        if i + 1 < len(self.shots):
-            frame = Image.blend(self._scene(i, progress), self._scene(i + 1, 0.0), mix)
-            frame = self._with_words(frame, i, 1 - 2 * mix)
-            return self._with_words(frame, i + 1, 2 * mix - 1).convert("RGB")
-        paper = Image.new("RGB", SIZE, self.end.getpixel((4, 4)))
-        if mix < 0.5:
-            return Image.blend(self.shot(i, progress), paper, mix * 2)
-        return Image.blend(paper, self.shot(i + 1, 0.0), mix * 2 - 1)
+    def _still(self, i: int) -> Image.Image:
+        if i >= len(self.shots):
+            return self.card.frame(SHOTS[-1] - 1)
+        t = 6 + RISE + STAGGER * 3
+        return self._scene(i, t)
 
     def frames(self):
         """Every frame of the video, in order."""
         starts = [sum(SHOTS[:i]) for i in range(len(SHOTS))]
         for n in range(sum(SHOTS)):
             i = max(k for k, s in enumerate(starts) if s <= n)
-            progress = (n - starts[i]) / SHOTS[i]
+            frame = self.frame(i, n - starts[i])
             if i + 1 < len(SHOTS) and n >= starts[i + 1] - FADE:
-                yield self._cut(i, progress, (n - (starts[i + 1] - FADE) + 1) / (FADE + 1))
-            else:
-                yield self.shot(i, progress)
+                mix = (n - (starts[i + 1] - FADE) + 1) / (FADE + 1)
+                frame = Image.blend(frame, self.frame(i + 1, 0), mix)
+            yield frame
 
 
-def _zoom(still: Image.Image, progress: float, push_out: bool = False,
-          push: float = PUSH) -> Image.Image:
-    """The still seen through a camera that moves in (or out) over the shot."""
-    zoom = 1 + push * ((1 - progress) if push_out else progress)
-    width, height = still.size
-    crop_w, crop_h = width / zoom, height / zoom
-    left, top = (width - crop_w) / 2, (height - crop_h) * 0.4
-    return still.resize(SIZE, Image.Resampling.BILINEAR,
-                        box=(left, top, left + crop_w, top + crop_h))
+class _EndCard:
+    """Paper card: wordmark, the original product photo easing in, the offer, the button and
+    the sign-off, inside the 9:16 safe area."""
+
+    def __init__(self, product: Image.Image, cta: str, style: Style, offer: str,
+                 sign_off: str) -> None:
+        width = SIZE[0]
+        left, top, right, bottom = safe_rect("9:16")
+        self.base = Image.new("RGBA", SIZE, (*style.paper, 255))
+        draw = ImageDraw.Draw(self.base)
+        if style.brand:
+            wordmark(draw, style, (left, top), 44, style.ink, align="center", width=right - left)
+        y = bottom
+        self.texts = []  # (layer, xy) shown after the product lands
+        if sign_off:
+            face = type_face(style.text, 34)
+            y -= block_height(face, [sign_off])
+            layer = Image.new("RGBA", SIZE, (0, 0, 0, 0))
+            draw_block(ImageDraw.Draw(layer), [sign_off], face, (left, y), (*style.ink, 190),
+                       align="center", width=right - left)
+            self.texts.append(layer)
+            y -= 40
+        if cta:
+            pw, ph = pill_size(style, 42, cta)
+            y -= ph
+            layer = Image.new("RGBA", SIZE, (0, 0, 0, 0))
+            pill(ImageDraw.Draw(layer), style, ((width - pw) // 2, y), 42, style.accent, cta)
+            self.texts.insert(0, layer)
+            y -= 44
+        if offer:
+            face, lines = fit_text(offer, style.display, right - left, range(60, 35, -4), 2)
+            y -= block_height(face, lines)
+            layer = Image.new("RGBA", SIZE, (0, 0, 0, 0))
+            draw_block(ImageDraw.Draw(layer), lines, face, (left, y), style.ink, align="center",
+                       width=right - left)
+            self.texts.insert(0, layer)
+            y -= 40
+        room_top = top + (90 if style.brand else 10)
+        room = (room_top, y)
+        scale = min(0.86 * (right - left) / product.width, (room[1] - room[0]) / product.height)
+        self.product = product.convert("RGBA")
+        self.scale = scale
+        self.room = room
+
+    def frame(self, t: int) -> Image.Image:
+        frame = self.base.copy()
+        grow = 0.92 + 0.08 * _ease(t / 18)
+        size = (max(1, int(self.product.width * self.scale * grow)),
+                max(1, int(self.product.height * self.scale * grow)))
+        shown = self.product.resize(size, Image.Resampling.BILINEAR)
+        x = (SIZE[0] - shown.width) // 2
+        y = self.room[0] + (self.room[1] - self.room[0] - shown.height) // 2
+        place_product(frame, shown, (x, y))
+        for k, layer in enumerate(self.texts):
+            amount = _ease((t - 6 - k * STAGGER) / RISE)
+            if amount <= 0:
+                continue
+            if amount < 1:
+                layer = layer.copy()
+                layer.putalpha(layer.getchannel("A").point(lambda v, a=amount: round(v * a)))
+            frame.alpha_composite(layer, (0, round(LIFT * (1 - amount))))
+        return frame.convert("RGB")
 
 
 def ffmpeg_path() -> str | None:
@@ -265,17 +263,25 @@ def encode(cut: Cut, path: str | Path) -> CreativeVideo | None:
                          sha256=digest)
 
 
-def contact_sheet(squares: list[Image.Image], stills: list[Image.Image]) -> Image.Image:
-    """What the Reviewer looks at: the square image for each scene on top, the video's shots
-    in order below."""
+def contact_sheet(squares: list[Image.Image], stills: list[Image.Image],
+                  reference: Image.Image | None = None) -> Image.Image:
+    """What the Reviewer looks at: the real product photo first, then the square image for each
+    scene on top, the video's shots in order below."""
     cell = 360
-    top = len(squares)
+    top_row = ([reference] if reference is not None else []) + list(squares)
     tall = round(cell * SIZE[1] / SIZE[0] * 0.75)
     still_w = round(tall * SIZE[0] / SIZE[1])
-    width = max(top * cell, len(stills) * still_w) + 16 * (max(top, len(stills)) + 1)
+    width = max(len(top_row) * (cell + 16), len(stills) * (still_w + 16)) + 16
     sheet = Image.new("RGB", (width, cell + tall + 48), (255, 255, 255))
-    for i, image in enumerate(squares):
-        sheet.paste(image.convert("RGB").resize((cell, cell)), (16 + i * (cell + 16), 16))
+    for i, image in enumerate(top_row):
+        tile = image.convert("RGB")
+        if i == 0 and reference is not None:
+            tile = tile.copy()
+            tile.thumbnail((cell, cell))
+            framed = Image.new("RGB", (cell, cell), (255, 255, 255))
+            framed.paste(tile, ((cell - tile.width) // 2, (cell - tile.height) // 2))
+            tile = framed
+        sheet.paste(tile.resize((cell, cell)), (16 + i * (cell + 16), 16))
     for i, image in enumerate(stills):
         sheet.paste(image.convert("RGB").resize((still_w, tall)),
                     (16 + i * (still_w + 16), cell + 32))

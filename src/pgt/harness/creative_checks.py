@@ -26,6 +26,10 @@ COPY_LIMITS: dict[str, int] = {"headline": 40, "primary_text": 125, "description
 VIDEO_LIMITS: dict[str, int] = {"hook": 34, "benefit": 34, "proof": 34, "cta": 20}
 SCENES = 3
 VARIANTS = SCENES
+WORDS_LIMIT = 40  # the line set on each picture
+# The share of the product the words may sit on, and the share that must stay in the frame.
+MAX_COVERED = 0.25
+MIN_SHOWN = 0.85
 
 _NUMBER = re.compile(
     r"(?<![\w.#])(?P<rank>#)?"
@@ -84,6 +88,17 @@ def check_copy(
     angles = [scene.angle.strip().lower() for scene in ad_copy.scenes]
     if len(set(angles)) != len(angles):
         issues.append("Each scene needs a different angle.")
+    words = [scene.words.strip() for scene in ad_copy.scenes]
+    for index, line in enumerate(words):
+        if not line:
+            issues.append(f"Scene {index + 1} needs words: the line set on its picture.")
+        elif len(line) > WORDS_LIMIT:
+            issues.append(f"Scene {index + 1} words are {len(line)} characters; the limit is "
+                          f"{WORDS_LIMIT}.")
+    if len({w.lower() for w in words if w}) < len([w for w in words if w]):
+        issues.append("Each scene needs different words.")
+    if len(ad_copy.scenes) == SCENES and len({scene.layout for scene in ad_copy.scenes}) < 2:
+        issues.append("Use at least two different layouts across the three scenes.")
     for field, limit in VIDEO_LIMITS.items():
         text = getattr(ad_copy.video, field)
         if not text.strip():
@@ -112,6 +127,7 @@ def check_copy(
 
     texts = {field: getattr(ad_copy, field) for field in COPY_LIMITS}
     texts |= {f"video {field}": getattr(ad_copy.video, field) for field in VIDEO_LIMITS}
+    texts |= {f"scene {i + 1} words": scene.words for i, scene in enumerate(ad_copy.scenes)}
     for field, text in texts.items():
         for value in extract_numbers(text):
             if not number_matches(value, candidates):
@@ -266,3 +282,44 @@ def check_answer(answer: Answer, ledger: EvidenceLedger) -> list[str]:
         if not number_matches(value, candidates):
             issues.append(f"Number {value:g} in the answer matches no cited evidence.")
     return issues
+
+
+def check_design(product: str, designs) -> list[str]:
+    """Check the laid-out pictures: the product was found and is in the frame, the words keep
+    off it, read at 4.5:1 and stay inside the safe zone. `designs` is a list of
+    (scene number, ratio, Design); a Design's product_box is None when SAM found nothing."""
+    from pgt.creative.design import MIN_CONTRAST, safe_rect
+
+    issues: list[str] = []
+    missing = sorted({n for n, _, d in designs if d.product_box is None})
+    for n in missing:
+        issues.append(f"Scene {n}: SAM 3.1 could not find the {product} in the photo. Show "
+                      f"\"the {product} from the reference photo\" clearly, large enough to see.")
+    for n, ratio, design in designs:
+        if n in missing:
+            continue
+        where = f"Scene {n} ({ratio}, {design.layout})"
+        if design.product_shown < MIN_SHOWN:
+            issues.append(f"{where}: the {product} is cut off at the edge of the picture; frame "
+                          "it with room around it.")
+        elif design.layout != "panel" and _covered(design) > MAX_COVERED:
+            calm = "top third" if design.layout == "poster" else "lower third"
+            issues.append(f"{where}: the words sit on the {product}. Keep the {calm} of the "
+                          "photo calm and the product out of it, or choose another layout.")
+        if design.contrast < MIN_CONTRAST - 0.05:
+            issues.append(f"{where}: the words read at only {design.contrast:.1f}:1 against the "
+                          "photo; ask for a calmer, simpler backdrop where they sit.")
+        left, top, right, bottom = safe_rect(ratio)
+        for box in design.text_boxes:
+            if box[0] < left - 2 or box[1] < top - 2 or box[2] > right + 2 or box[3] > bottom + 2:
+                issues.append(f"{where}: words fall outside the safe zone.")
+                break
+    # One line per problem, not one per placement size.
+    return list(dict.fromkeys(issues))
+
+
+def _covered(design) -> float:
+    from pgt.creative.design import covered
+
+    return covered(design.product_box, design.text_boxes)
+
