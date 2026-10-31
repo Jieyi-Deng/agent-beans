@@ -2,8 +2,8 @@
 // three numbers and the chart with the team's moves on it; the full numbers follow below. All of
 // it is read from the same Insights-shaped rows the Analyst reads.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { api, date, useData, type Action, type CampaignRow, type DashboardData, type Deliverable,
-  type DraftNode, type Kpi, type Metrics } from "./api";
+import { api, date, onDay, onDays, useData, type Action, type CampaignRow, type DashboardData,
+  type Deliverable, type DraftNode, type Kpi, type Metrics } from "./api";
 import { go, type Route } from "./route";
 import { Av } from "./ui";
 
@@ -35,7 +35,7 @@ function Tile({ k, d, open, onOpen }: { k: Kpi; d: Ready; open: boolean; onOpen:
         <span className="tip" onClick={(e) => e.stopPropagation()}>
           <span className="m">{ev.rows} Insights rows · {ev.first} to {ev.last}</span>
           <span style={{ display: "block", marginTop: 5 }}>
-            <b>{fmt(k)}</b> = {k.formula}, days {d.start} to {d.end}, every ad in the account.
+            <b>{fmt(k)}</b> = {k.formula}, {onDays(d.start, d.end)}, every ad in the account.
           </span>
           <span className="m" style={{ display: "block", marginTop: 6 }}>
             fields: {ev.fields} · level={ev.level} · time_increment=1
@@ -184,7 +184,7 @@ function group(actions: Action[]): DidRow[] {
   return out;
 }
 
-const days = (g: DidRow) => (g.first === g.last ? `Day ${g.first}` : `Days ${g.first} to ${g.last}`);
+const days = (g: DidRow) => onDays(g.first, g.last);
 
 /** The few words a chart callout has room for: "Created 2 paused ads (...), after ..." reads
  *  "Created 2 paused ads". */
@@ -232,13 +232,17 @@ function Chart({ d }: { d: Ready }) {
     callouts.push({ day, i, label, bx, bw });
     edge = bx + bw + 8;
   }
-  const xl = n <= 8 ? s.map((_, i) => i) : [0, Math.floor((n - 1) / 2), n - 1];
+  // As many dates as fit without touching ("Nov 10" is about 6 characters), always the last one.
+  const labelEvery = n > 1 ? Math.max(1, Math.ceil((7 * CHAR + 12) / (pw / (n - 1)))) : 1;
+  const xl = s.map((_, i) => i)
+    .filter((i) => i === n - 1 || (i % labelEvery === 0 && n - 1 - i >= labelEvery));
 
   return (
     <div ref={ref} className="db-chart">
       {W > 0 && (
         <svg width={W} height={H} role="img"
-             aria-label={`Cost per ${name} each day, days ${d.start} to ${d.end}, against your ${usd(d.target)} goal`}>
+             aria-label={`Cost per ${name} each day, ${onDays(d.start, d.end)}, against your `
+                         + `${usd(d.target)} goal`}>
           <rect x={L} y={y(d.target)} width={pw} height={T + ph - y(d.target)} fill="var(--good-pale)" opacity=".55" />
           {ticks.map((v) => (
             <text key={v} x={L - 10} y={y(v) + 4} textAnchor="end" className="db-ax">{usd0(v)}</text>
@@ -250,20 +254,20 @@ function Chart({ d }: { d: Ready }) {
             <g key={c.day}>
               <line x1={x(c.i)} x2={x(c.i)} y1={T - 18} y2={T + ph} stroke="var(--rule-strong)" />
               <rect x={c.bx} y={4} width={c.bw} height={34} rx="2" fill="var(--surface)" stroke="var(--rule-strong)" />
-              <text x={c.bx + 8} y={18} className="db-ax">Day {c.day}</text>
+              <text x={c.bx + 8} y={18} className="db-ax">{onDay(c.day)}</text>
               <text x={c.bx + 8} y={32} className="db-call">{c.label}</text>
             </g>
           ))}
           <polyline fill="none" stroke="var(--blue)" strokeWidth="2.2" strokeLinejoin="round" points={line} />
           {pts.map((p, i) => p && (
             <circle key={i} cx={p[0]} cy={p[1]} r="7" fill="transparent">
-              <title>Day {s[i].day}: {usd(s[i].cpr)} per {name}, {usd(s[i].spend)} spent</title>
+              <title>{onDay(s[i].day)}: {usd(s[i].cpr)} per {name}, {usd(s[i].spend)} spent</title>
             </circle>
           ))}
           {over.map(({ i }) => <circle key={"o" + i} cx={pts[i]![0]} cy={pts[i]![1]} r="4.5" fill="var(--signal)" pointerEvents="none" />)}
           {over.length > 0 && (() => {
             const lastOver = over[over.length - 1];
-            const label = over.length === 1 ? `${usd(lastOver.p.cpr)} on day ${lastOver.p.day}`
+            const label = over.length === 1 ? `${usd(lastOver.p.cpr)} on ${onDay(lastOver.p.day)}`
               : `Over your goal on ${over.length} days`;
             const px = pts[lastOver.i]![0];
             const anchor = px > L + pw * 0.7 ? "end" : "start";
@@ -272,7 +276,7 @@ function Chart({ d }: { d: Ready }) {
           })()}
           {xl.map((i) => (
             <text key={i} x={x(i)} y={H - 6} textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"}
-                  className="db-ax">Day {s[i].day}</text>
+                  className="db-ax">{onDay(s[i].day)}</text>
           ))}
         </svg>
       )}
@@ -437,11 +441,11 @@ export default function Dashboard({ tick, route, sidebar, items }:
       <main ref={main} className="col scroll top db" style={{ minWidth: 0 }}>
         <div className="db-head">
           <div>
-            <div className="eyebrow">{data?.account_name ?? "Sandbox"}{d ? ` · days ${d.start} to ${d.end}` : ""}</div>
+            <div className="eyebrow">{data?.account_name ?? "Sandbox"}{d ? ` · ${onDays(d.start, d.end)}` : ""}</div>
             <div className="h1" style={{ marginTop: 4 }}>Dashboard</div>
           </div>
           <div className="row" style={{ gap: 12 }}>
-            {d?.pulled && <span className="mono muted" style={{ fontSize: 11 }}>Pulled by Analyst · {date(d.pulled.ts)}</span>}
+            {d?.pulled && <span className="mono muted" style={{ fontSize: 11 }}>Pulled by Analyst · {d.pulled.day ? onDay(d.pulled.day) : date(d.pulled.ts)}</span>}
             <div className="seg" role="tablist">
               {[7, 14, 28].map((n) => (
                 <button key={n} className={n === range ? "on" : ""} onClick={() => go("dashboard", { days: n === 7 ? null : n })}>{n} days</button>
@@ -457,7 +461,7 @@ export default function Dashboard({ tick, route, sidebar, items }:
         {d && (
           <>
             {d.short && <div className="db-cap">
-              Only {d.end} {d.end === 1 ? "day has" : "days have"} run, so this shows days {d.start} to {d.end}.</div>}
+              Only {d.end} {d.end === 1 ? "day has" : "days have"} run, so this shows {onDays(d.start, d.end)}.</div>}
             <Briefing d={d} waiting={waiting} />
             <div className="db-low">
               <Did d={d} />

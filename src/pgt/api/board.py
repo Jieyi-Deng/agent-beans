@@ -187,7 +187,7 @@ def _actions(ws: Workspace, account, idx: Index, start: int, end: int) -> list[d
         text = "; ".join(parts)
         out.append({"day": e.sim_day, "who": role("operator"), "verb": "",
                     "text": text[0].upper() + text[1:] + f", after {by} approved",
-                    "evidence": evidence, "link": {"key": rec.key, "title": title(rec)},
+                    "evidence": evidence, "link": {"key": rec.key, "title": title(rec, idx.start)},
                     "order": 1})
     out.sort(key=lambda a: (a["day"], a["order"]))
     for n, a in enumerate(out, 1):
@@ -316,7 +316,7 @@ def dashboard(ws: Workspace, account, days: int = 7) -> dict:
                       + (", purchase value" if any(r.purchase_value is not None for r in rows)
                          else ""),
             "level": "ad",
-            "used_in": {"key": used[-1].key, "title": title(used[-1])} if used else None,
+            "used_in": {"key": used[-1].key, "title": title(used[-1], idx.start)} if used else None,
         },
         "series": series,
         "actions": actions,
@@ -491,7 +491,7 @@ def _made(ws, idx, account, media_dir, record, plans, facts) -> dict:
             ["Ad", ad_id or "Not created yet"],
             ["After launch", after],
         ],
-        "used_in": {"key": cs.key, "title": title(cs)} if cs else None,
+        "used_in": {"key": cs.key, "title": title(cs, idx.start)} if cs else None,
         "deliverable": record.key,
     }
 
