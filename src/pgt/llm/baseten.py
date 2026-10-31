@@ -19,6 +19,9 @@ BASETEN_BASE_URL = "https://inference.baseten.co/v1"
 BASETEN_MODEL = "meta-models/muse-spark-open-1026"
 KEY_VARS = ("BASETEN_API_KEY", "Baseten_API")
 EFFORTS = ("low", "medium", "high", "xhigh")
+# Recorded runs never needed more than about 4,500 output tokens in one call. Without a limit a
+# runaway answer once ran to the 32,768-token default, twice, at four minutes each.
+MAX_OUTPUT = 12_000
 
 
 def baseten_client() -> AsyncOpenAI:
@@ -42,5 +45,5 @@ def chat_model(
         profile=OpenAIModelProfile(
             openai_chat_thinking_field="reasoning_content",
         ),
-        settings=OpenAIChatModelSettings(openai_reasoning_effort=effort),
+        settings=OpenAIChatModelSettings(openai_reasoning_effort=effort, max_tokens=MAX_OUTPUT),
     )

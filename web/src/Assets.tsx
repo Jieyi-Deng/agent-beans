@@ -62,6 +62,46 @@ function Drop({ onDone }: { onDone: () => void }) {
   );
 }
 
+/** The scenes of one ad and its video. A row of tiles picks what the large frame shows; the
+ * size links under it open the chosen scene in each placement size. */
+function Media({ a }: { a: Asset }) {
+  const scenes = [...new Set(a.images.map((i) => i.variant ?? 1))].sort();
+  const [pick, setPick] = useState<number | "video">(scenes[0] ?? 1);
+  if (!a.images.length) return a.image ? <img className="side-img" src={a.image} alt={a.title} /> : null;
+  const sizes = a.images.filter((i) => (i.variant ?? 1) === pick);
+  const square = (n: number) => a.images.find((i) => (i.variant ?? 1) === n && i.ratio === "1:1")?.url;
+  const tall = a.images.find((i) => (i.variant ?? 1) === scenes[0] && i.ratio === "9:16")?.url;
+  const label = (n: number) => a.scenes?.[n - 1] || `Scene ${n}`;
+  return (
+    <>
+      {pick === "video" && a.video
+        ? <video className="side-img side-video" src={a.video} poster={tall ?? undefined} controls muted playsInline preload="metadata" />
+        : <img className="side-img" src={square(pick as number) ?? a.image ?? ""} alt={`${a.title}, ${label(pick as number)}`} />}
+      {(scenes.length > 1 || a.video) && (
+        <div className="tiles">
+          {scenes.map((n) => (
+            <button key={n} className={"tile" + (pick === n ? " on" : "")} onClick={() => setPick(n)} title={label(n)}>
+              <img src={square(n) ?? ""} alt="" />
+              <span>{label(n)}</span>
+            </button>
+          ))}
+          {a.video && (
+            <button className={"tile" + (pick === "video" ? " on" : "")} onClick={() => setPick("video")} title="10-second video">
+              <img src={tall ?? ""} alt="" />
+              <span>Video</span>
+            </button>
+          )}
+        </div>
+      )}
+      {pick !== "video" && sizes.length > 0 && (
+        <div className="sizes">
+          {sizes.map((i) => i.url && <a key={i.ratio} href={i.url} target="_blank" rel="noreferrer" title={`${i.width} x ${i.height}`}>{i.ratio}</a>)}
+        </div>
+      )}
+    </>
+  );
+}
+
 function Side({ a, mode }: { a: Asset; mode?: Mode }) {
   const big = a.images.find((i) => i.ratio === "1:1")?.url ?? a.image;
   const offline = mode === "offline";
@@ -71,12 +111,7 @@ function Side({ a, mode }: { a: Asset; mode?: Mode }) {
         <span className="h2">{a.title}</span>
         <button className="btn ghost xs" onClick={() => go("assets")}>Close</button>
       </div>
-      {big && <img className="side-img" src={big} alt={a.title} />}
-      {a.images.length > 0 && (
-        <div className="sizes">
-          {a.images.map((i) => i.url && <a key={i.ratio} href={i.url} target="_blank" rel="noreferrer" title={`${i.width} x ${i.height}`}>{i.ratio}</a>)}
-        </div>
-      )}
+      <Media key={a.id} a={a} />
       <div className="row" style={{ gap: 6 }}>
         <span className={"lbl " + a.status}>{a.status_label}</span>
         <span className="mono muted" style={{ fontSize: 11 }}>

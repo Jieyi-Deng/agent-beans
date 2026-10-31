@@ -38,9 +38,14 @@ export type RoomItem = Msg | Fold | DayDiv;
 
 export type Check = { passed: boolean; text: string; rule: string; evidence?: string[] };
 export type Evidence = { id: string; note: string; values: Record<string, number> };
-export type Image = { ratio: string; width: number; height: number; url: string | null };
-export type AdCopy = { name: string; headline: string; primary_text: string; description: string };
-export type Creative = { key: string; title: string; test_id: string; ad_copy: AdCopy; images: Image[] };
+export type Image = { ratio: string; width: number; height: number; url: string | null; variant?: number };
+export type Video = { width: number; height: number; seconds: number; url: string | null };
+export type Scene = { angle: string; prompt: string };
+export type Storyboard = { hook: string; benefit: string; proof: string; cta: string };
+export type AdCopy = { name: string; headline: string; primary_text: string; description: string;
+                       scenes?: Scene[]; video?: Storyboard };
+export type Creative = { key: string; title: string; test_id: string; ad_copy: AdCopy; images: Image[];
+                         video?: Video | null };
 
 export type Detail = Deliverable & {
   headline: string;
@@ -104,6 +109,7 @@ export type Asset = {
   test_id: string | null; week: string | null; status: string; status_label: string;
   version: number; updated: string | null; models: string[]; after: string; bad: boolean;
   image: string | null; images: (Image & { path: string })[]; source: string | null;
+  video?: string | null; scenes?: string[];
   steps: Step[]; facts: [string, string][]; used_in: Link | null; deliverable: string | null;
 };
 
@@ -255,6 +261,13 @@ export function clock(ts: string | null | undefined): string {
   if (!ts) return "";
   const d = new Date(ts);
   return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+/** A date as Mon D YYYY, e.g. "Oct 31 2026"; today when there is no timestamp. */
+export function date(ts?: string | null): string {
+  const d = ts ? new Date(ts) : new Date();
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.toLocaleString("en-US", { month: "short" })} ${d.getDate()} ${d.getFullYear()}`;
 }
 
 export function when(ts: string | null | undefined, day: number | null | undefined): string {

@@ -11,6 +11,8 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from email.parser import BytesParser
+from email.policy import default
 from typing import Any
 
 import httpx
@@ -125,9 +127,26 @@ def output_name(body: dict) -> str:
     return body.get("text", {}).get("format", {}).get("name", "")
 
 
+def form_fields(request: httpx.Request) -> dict:
+    """The fields of a multipart image-edit request; the reference image comes back as bytes
+    under "image"."""
+    message = BytesParser(policy=default).parsebytes(
+        b"Content-Type: " + request.headers["content-type"].encode() + b"\r\n\r\n"
+        + request.read()
+    )
+    body: dict[str, Any] = {}
+    for part in message.iter_parts():
+        name = part.get_param("name", header="content-disposition")
+        data = part.get_payload(decode=True) or b""
+        body[name] = data if part.get_filename() else data.decode()
+    return body
+
+
 class MetaFake:
-    """Serves POST /v1/responses and /v1/images/generations. `responder(body)` returns the output
-    for each Responses request; `image_responder(body)` returns PNG bytes for each image request."""
+    """Serves POST /v1/responses, /v1/images/generations and /v1/images/edits.
+    `responder(body)` returns the output for each Responses request; `image_responder(body)`
+    returns PNG bytes for each image request (an edit's body carries the reference under
+    "image")."""
 
     def __init__(self, responder: Responder, image_responder: ImageResponder | None = None) -> None:
         self.responder = responder
@@ -146,6 +165,12 @@ class MetaFake:
         )
 
     def _respond(self, request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v1/images/edits":
+            body = form_fields(request)
+            self.requests.append({k: v for k, v in body.items() if k != "image"})
+            if not body.get("image"):
+                self.violations.append("Image edits need a reference image")
+            return self._image(body)
         body = json.loads(request.content or b"{}")
         self.requests.append(body)
         if request.method == "POST" and request.url.path == "/v1/images/generations":
@@ -159,7 +184,8 @@ class MetaFake:
         output: list[dict] = []
         annotations: list[dict] = []
         if isinstance(obj, Searched):
-            for query in obj.queries:
+            limit = body.get("max_tool_calls") or len(obj.queries)  # Meta honours this cap
+            for query in obj.queries[:limit]:
                 output.append(
                     {
                         "type": "web_search_call",

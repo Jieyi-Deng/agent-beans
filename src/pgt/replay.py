@@ -53,8 +53,15 @@ def _paths(get_json: Callable[[str], dict]) -> list[str]:
 
 
 def _media(get: Get, url: str, out: Path) -> str:
-    """Copies one image the pages show and returns its path inside the site."""
+    """Copies one image or video the pages show and returns its path inside the site. Images
+    without transparency are saved as JPEG to keep the site small; videos are copied as they
+    are."""
     rel = url.removeprefix(MEDIA)
+    if rel.endswith(".mp4"):
+        target = Path("media") / rel
+        (out / target).parent.mkdir(parents=True, exist_ok=True)
+        (out / target).write_bytes(get(url))
+        return target.as_posix()
     image = Image.open(io.BytesIO(get(url)))
     clear = image.mode in ("RGBA", "LA", "P") and image.convert("RGBA").getextrema()[3][0] < 255
     target = Path("media") / (rel if clear else str(Path(rel).with_suffix(".jpg")))

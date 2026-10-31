@@ -87,15 +87,63 @@ class Claim(_Out):
     source_urls: list[str]
 
 
+SceneLayout = Literal["band", "panel", "poster", "offer"]
+
+
+class Scene(_Out):
+    """One shot of the ad. Muse Image renders it with the real product photo as its reference;
+    layout code sets the words over it."""
+
+    angle: str  # what this picture tries, in a few words, e.g. "Dark evening walk"
+    prompt: str  # the photograph: who, doing what, where, camera, light; the product in it
+    layout: SceneLayout  # how code sets the words: see the Producer's instructions
+    words: str  # the line set on this picture, 40 characters at most
+
+    @model_validator(mode="before")
+    @classmethod
+    def _older_scene(cls, data):
+        """Scenes saved before layouts were background prompts with no words of their own."""
+        if isinstance(data, dict) and "layout" not in data:
+            data = {**data, "layout": "band", "words": data.get("words", "")}
+        return data
+
+
+class Storyboard(_Out):
+    """Words on screen in the 10-second 9:16 video. Code animates the three scenes in order and
+    ends on a card with the product, the offer and the button."""
+
+    hook: str  # 0-3 s over scene 1: stops the scroll
+    benefit: str  # 3-6 s over scene 2: what changes for the customer
+    proof: str  # 6-8.5 s over scene 3: why to believe it
+    cta: str  # 8.5-10 s end card: one of the advertiser's call-to-action buttons
+
+
 class CreativeCopy(_Out):
-    """Creative Producer: the words of one ad, plus the scene for its background image."""
+    """Creative Producer: the concept and words of one ad, three art-directed shots and a video
+    storyboard."""
 
     name: str  # short ad name, e.g. "Progress photo v1"
+    concept: str  # the one idea behind the ad, as an art director would pitch it
     headline: str
     primary_text: str
     description: str
     claims: list[Claim]  # every factual statement in the copy, with its support
-    image_prompt: str  # background scene only: no text, no phone, no people's bodies
+    scenes: list[Scene]  # exactly three, each a different setting for the same message
+    video: Storyboard
+
+    @model_validator(mode="before")
+    @classmethod
+    def _older_copy(cls, data):
+        """Copy saved before ads had three scenes carries one image_prompt and no video."""
+        if isinstance(data, dict) and "concept" not in data:
+            data = {**data, "concept": ""}
+        if isinstance(data, dict) and "image_prompt" in data and "scenes" not in data:
+            data = dict(data)
+            prompt = data.pop("image_prompt")
+            data["scenes"] = [{"angle": data.get("name", ""), "prompt": prompt}]
+            data["video"] = {"hook": data.get("headline", ""), "benefit": "", "proof": "",
+                             "cta": ""}
+        return data
 
 
 class Answer(_Out):
@@ -145,6 +193,15 @@ class CreativeImage(_Out):
     height: int
     path: str
     sha256: str
+    variant: int = 1  # which of the copy's scenes, from 1
+
+
+class CreativeVideo(_Out):
+    width: int
+    height: int
+    seconds: float
+    path: str
+    sha256: str
 
 
 class CreativeSet(_Out):
@@ -152,7 +209,8 @@ class CreativeSet(_Out):
     test_id: str
     attempt: int  # 1 for the first draft; counts on through redos and send-backs
     ad_copy: CreativeCopy
-    images: list[CreativeImage]
+    images: list[CreativeImage]  # every scene in every placement size
+    video: CreativeVideo | None = None  # None when ffmpeg is not installed
     question_ids: list[str]  # ask/answer events this set relied on
 
 

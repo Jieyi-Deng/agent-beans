@@ -10,8 +10,24 @@ from pgt.llm.media import MediaClient
 from pgt.llm.offline import offline_model, offline_responder, tool_outputs
 from pgt.loops.simulate import simulate
 from pgt.loops.weekly import apply_week, plan_week, produce_week
-from pgt.schemas import ChangeSet, Claim, CreativeCopy
+from pgt.schemas import ChangeSet, Claim, CreativeCopy, Scene, Storyboard
 from pgt.schemas import TestPlan as Plan
+
+
+def three_scenes():
+    return [
+        Scene(angle="Morning", prompt="A bright living room at sunrise with open floor space",
+              layout="band", words="Done before your coffee cools"),
+        Scene(angle="Midday", prompt="A tidy home office corner at midday, clear floor",
+              layout="panel", words="Ten minutes. Then lunch."),
+        Scene(angle="Evening", prompt="A cosy bedroom corner in lamp light, empty rug",
+              layout="poster", words="Show up again tomorrow"),
+    ]
+
+
+def storyboard():
+    return Storyboard(hook="Ten minutes. Your living room.", benefit="Fits before work",
+                      proof="Short plans you keep", cta="Try It")
 
 
 def week_one(responder=offline_responder):
@@ -70,6 +86,8 @@ def test_scenario_1_normal_weekly_review(tmp_path):
         if e.payload["role"] == "strategist"
     ]
     assert sum(e.payload["searches"] for e in research_calls) >= 1
+    research = [r for r in fake.requests if output_name(r) == "MarketResearch"]
+    assert research and all(r["max_tool_calls"] == 8 for r in research)  # a search budget
     answered = ws.events.list("question.answered", loop_id="weekly-w1")
     assert {e.payload["task_id"] for e in answered} == {"w1-t1", "w1-t2"}
     assert all(not e.payload["issues"] for e in answered)
@@ -103,7 +121,8 @@ def test_scenario_2_unsupported_claim_is_sent_back(tmp_path):
             claims=[
                 Claim(text="fits your day", evidence_ids=outputs[0]["evidence_ids"], source_urls=[])
             ],
-            image_prompt="A bright living room with open floor space",
+            scenes=three_scenes(),
+            video=storyboard(),
         )
 
     ws, account, model, fake = week_one(first_draft_for("w1-t1", bad))
@@ -130,7 +149,8 @@ def test_scenario_3_wrong_number_is_blocked_by_code(tmp_path):
             description="Start your free trial",
             # The cited evidence says the drop was 51%.
             claims=[Claim(text="CTR fell 50%", evidence_ids=["ev-d3-ad_1-ctr"], source_urls=[])],
-            image_prompt="A bright living room with open floor space",
+            scenes=three_scenes(),
+            video=storyboard(),
         )
 
     ws, account, model, fake = week_one(first_draft_for("w1-t1", bad))

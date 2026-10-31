@@ -506,3 +506,18 @@ def test_override_needs_second_confirmation(ws):
     # Approving only the allowed subset needs no override.
     ws.approvals.grant("d1/change_set", record, approved=[])
     assert ws.approvals.approved_indexes("d1/change_set") == []
+
+
+def test_a_reader_holding_the_file_open_never_blocks_the_team(tmp_path):
+    """Someone browsing the workspace file mid-run (a viewer, a script) must not fail a day."""
+    path = tmp_path / "workspace.db"
+    ws = Workspace(path)
+    ws.events.append("tool.call", "analyst", {"name": "x"})
+    reader = sqlite3.connect(path, timeout=0)
+    reader.execute("BEGIN")
+    assert reader.execute("SELECT count(*) FROM events").fetchone() == (1,)
+    ws.events.append("tool.call", "analyst", {"name": "y"})  # a rollback journal would lock here
+    reader.rollback()
+    assert reader.execute("SELECT count(*) FROM events").fetchone() == (2,)
+    reader.close()
+    ws.close()

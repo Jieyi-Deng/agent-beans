@@ -11,11 +11,13 @@ import base64
 import json
 from io import BytesIO
 
-from PIL import Image
+from PIL import Image, ImageStat
 
 from pgt.creative.compose import (
     make_demo_product_shot,
+    matte,
     offline_background,
+    place_product,
     png_bytes,
     product_box,
 )
@@ -35,7 +37,9 @@ from pgt.schemas import (
     MarketInsight,
     MarketResearch,
     PlannedTest,
+    Scene,
     Source,
+    Storyboard,
     TestPlanDraft,
     TestReadout,
     WeeklyBrief,
@@ -193,8 +197,12 @@ def _sells_online(body: dict) -> bool:
     return '\\"result_name\\": \\"purchase\\"' in json.dumps(body)
 
 
+DEMO_BACKDROP = (242, 240, 234)  # corner colour of the drawn demo phone shot
+
+
 def _segment(body: dict) -> RawText:
-    """SAM 3.1 stand-in: the phone in the demo product shot, or the product in a studio photo."""
+    """SAM 3.1 stand-in: the phone in the demo product shot, or whatever stands out from the
+    backdrop in a studio photo or an offline scene."""
     image, concept = None, "phone"
     for item in body.get("input", []):
         for part in item.get("content", []) if isinstance(item, dict) else []:
@@ -205,18 +213,44 @@ def _segment(body: dict) -> RawText:
             url = part.get("image_url", "")
             if url.startswith("data:image/"):
                 image = Image.open(BytesIO(base64.b64decode(url.split(",", 1)[1])))
-    if image is not None and concept != "phone":
-        box = product_box(image)
-    else:
+    demo = image is None or (
+        image.width == image.height and image.convert("RGB").getpixel((0, 0)) == DEMO_BACKDROP
+    )
+    if demo:
         _, box = make_demo_product_shot(image.width if image is not None else 1600)
+    else:
+        box = product_box(image)
     return RawText(
         f"<0f>0<|box;x1={box.x1};y1={box.y1};x2={box.x2};y2={box.y2};w={box.w};h={box.h}|>"
     )
 
 
 def offline_image(body: dict) -> bytes:
-    """Muse Image stand-in: a deterministic gradient per prompt."""
+    """Muse Image stand-in: a deterministic gradient per prompt, or for an edit, the reference
+    product set large on a plain prompt-seeded backdrop."""
+    if body.get("image"):
+        return png_bytes(_offline_scene(body))
     return png_bytes(offline_background(body.get("prompt", "")))
+
+
+def _offline_scene(body: dict) -> Image.Image:
+    width, height = (int(v) for v in str(body.get("size") or "1024x1536").split("x"))
+    with Image.open(BytesIO(body["image"])) as reference:
+        reference = reference.convert("RGB")
+    if reference.getpixel((0, 0)) == DEMO_BACKDROP and reference.width == reference.height:
+        _, box = make_demo_product_shot(reference.width)
+    else:
+        box = product_box(reference)
+    product = matte(reference, box)
+    # A flat backdrop far from the product's own brightness, so the SAM stand-in finds it.
+    seed = offline_background(body.get("prompt", ""), (8, 8)).getpixel((4, 4))
+    light = ImageStat.Stat(product.convert("L")).mean[0] < 128
+    tone = tuple(190 + v // 4 for v in seed) if light else tuple(20 + v // 6 for v in seed)
+    scene = Image.new("RGBA", (width, height), (*tone, 255))
+    scale = min(0.5 * width / product.width, 0.42 * height / product.height)
+    product = product.resize((round(product.width * scale), round(product.height * scale)))
+    place_product(scene, product, ((width - product.width) // 2, round(0.24 * height)))
+    return scene.convert("RGB")
 
 
 def _weekly_brief(inputs: dict) -> WeeklyBrief:
@@ -231,6 +265,7 @@ def _weekly_brief(inputs: dict) -> WeeklyBrief:
     )
 
 
+LAYOUTS = ("band", "panel", "poster")
 APP = {
     "product": "phone",
     "query": "fitness app ads",
@@ -238,7 +273,17 @@ APP = {
     "key_message": "Short home workouts you can keep up.",
     "primary_text": "Short home workouts that fit your day. Keep your streak going.",
     "description": "Start your free trial",
-    "scene": "A calm, bright living room with open floor space",
+    "scenes": (
+        ("Morning before work", ("A calm, bright living room at sunrise, a rolled yoga mat by "
+         "the window, open wooden floor in the lower middle, soft warm light")),
+        ("Lunch break at home", ("A tidy home office corner at midday, a water bottle on the "
+         "desk, a small rug with clear floor space in the lower middle, daylight")),
+        ("Evening wind-down", ("A cosy bedroom corner in the evening, a folded towel and a mug "
+         "of tea on a low shelf, empty rug in the lower middle, lamp light")),
+    ),
+    "words": ("Ten minutes. Then coffee.", "Show up again tomorrow"),
+    "video": ("Ten minutes. Your living room.", "Fits before work or after", "Free 7-day trial",
+              "Try It"),
 }
 STORE = {
     "product": "dog harness",
@@ -248,7 +293,17 @@ STORE = {
     "primary_text": "Our no-pull harness spreads the pull across the chest, so the daily walk "
                     "feels easy for both of you. Free shipping over $50.",
     "description": "Shop the harness",
-    "scene": "A leafy park path in soft morning light, open ground in the middle",
+    "scenes": (
+        ("Morning park walk", ("A leafy park path in soft morning light, autumn leaves on the "
+         "ground, open path in the lower middle")),
+        ("By the front door", ("A bright entryway with a leash hook by the front door, wooden "
+         "floor with clear space in the lower middle, window light")),
+        ("Autumn street", ("A quiet tree-lined street in autumn, warm low sun, clean pavement in "
+         "the lower middle")),
+    ),
+    "words": ("Clips on in seconds", "Free shipping over $50"),
+    "video": ("The walk you both look forward to", "Spreads the pull across the chest",
+              "Free shipping over $50", "Shop Now"),
 }
 
 OFFLINE_INSIGHTS = [
@@ -400,6 +455,9 @@ def _creative_copy(
     evidence_ids = next((o["evidence_ids"] for o in outputs if o.get("evidence_ids")), [])
     brief = test["brief"]
     redo = bool(_owner_notes(inputs))
+    hook, benefit, proof, cta = flavor["video"]
+    if redo:
+        hook = brief["key_message"][:34]
     return CreativeCopy(
         name=f"{brief['angle']} {'v2' if redo else 'v1'}",
         # A rule-based stand-in cannot read the note; it switches to the key message so the
@@ -408,7 +466,14 @@ def _creative_copy(
         primary_text=flavor["primary_text"],
         description=flavor["description"],
         claims=[Claim(text=brief["key_message"], evidence_ids=evidence_ids, source_urls=[])],
-        image_prompt=f"{flavor['scene']}, mood: {brief['angle']}",
+        concept=f"{brief['angle']}: {brief['key_message']}",
+        scenes=[Scene(angle=angle, prompt=f"{prompt}, the {brief.get('product') or flavor['product']} "
+                      f"from the reference photo, mood: {brief['angle']}", layout=layout,
+                      words=words)
+                for (angle, prompt), layout, words in zip(
+                    flavor["scenes"], LAYOUTS, (brief["hook"][:40], *flavor["words"]),
+                    strict=True)],
+        video=Storyboard(hook=hook, benefit=benefit, proof=proof, cta=cta),
     )
 
 

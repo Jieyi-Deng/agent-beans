@@ -30,7 +30,7 @@ from bench.grader import Grade, call_costs, grade, verdict
 from bench.run import ARMS, ROOT, SEEDS
 from bench.scenarios import BUDGET_CAMPAIGN, BY_KEY, Scenario
 from bench.world import ScriptedUser, WeekResult, build_world
-from pgt.llm.fake import check_meta_request
+from pgt.llm.fake import check_meta_request, form_fields
 from pgt.llm.meta import DEFAULT_MODEL, META_BASE_URL, responses_model
 
 LIVE_ARMS = ["pgt", "single-agent", "agents-sdk"]
@@ -81,8 +81,11 @@ class _Recorder(httpx.AsyncBaseTransport):
         live = self.live
         if live.spend.spent >= live.spend.cap:
             raise SpendCapReached(f"Spend cap ${live.spend.cap:g} reached.")
-        body = json.loads(request.content or b"{}")
         path = request.url.path
+        if path.endswith("/images/edits"):
+            body = {k: v for k, v in form_fields(request).items() if k != "image"}
+        else:
+            body = json.loads(request.content or b"{}")
         if path.endswith("/responses"):
             live.violations.extend(check_meta_request(body))
         response = await self.inner.handle_async_request(request)
@@ -104,7 +107,7 @@ class _Recorder(httpx.AsyncBaseTransport):
 
 
 def _usage(body: dict, path: str, data: dict) -> dict | None:
-    if path.endswith("/images/generations"):
+    if path.endswith(("/images/generations", "/images/edits")):
         return {"model": body.get("model"), "input_tokens": 0, "output_tokens": 0, "searches": 0}
     if not path.endswith("/responses"):
         return None

@@ -360,7 +360,8 @@ class MetaWriter:
             raise WriteRefused("A new ad needs a reviewed creative with an image")
         if not account.page_id or not account.link_url:
             raise WriteRefused("Set META_PAGE_ID and META_LINK_URL to create ads")
-        image = next((i for i in creative.images if i.ratio == "1:1"), creative.images[0])
+        image = next((i for i in creative.images if i.ratio == "1:1" and i.variant == 1),
+                     creative.images[0])
         path = Path(image.path)
         if not path.is_file():
             raise WriteRefused(f"The image for {creative.creative_id} is missing")

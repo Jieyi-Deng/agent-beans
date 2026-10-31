@@ -8,9 +8,12 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageMath, ImageOps
 
 from pgt.schemas.weekly import CREATIVE_SIZES
+
+FONTS = Path(__file__).with_name("fonts")  # Liberation Sans, SIL Open Font License 1.1
+INK = (15, 23, 30)
 
 SAFE_MARGINS: dict[str, tuple[int, int, int, int]] = {
     "1:1": (60, 60, 60, 60),
@@ -74,6 +77,145 @@ def cutout(image: Image.Image, box: Box, radius_ratio: float = 0.08) -> Image.Im
     )
     product.putalpha(mask)
     return product
+
+
+def font(size: int, bold: bool = True) -> ImageFont.FreeTypeFont:
+    name = "LiberationSans-Bold.ttf" if bold else "LiberationSans-Regular.ttf"
+    return ImageFont.truetype(str(FONTS / name), max(1, size))
+
+
+def _studio_color(image: Image.Image) -> tuple[int, int, int]:
+    """The plain backdrop of a studio photo: the median colour of its border."""
+    rgb = image.convert("RGB")
+    small = rgb.resize((128, max(1, round(128 * rgb.height / rgb.width))))
+    w, h = small.size
+    border = [small.getpixel((x, y)) for x in range(w) for y in (0, h - 1)] + \
+             [small.getpixel((x, y)) for y in range(h) for x in (0, w - 1)]
+    return tuple(sorted(c[i] for c in border)[len(border) // 2] for i in range(3))
+
+
+def _backdrop_like(crop: Image.Image, backdrop: tuple[int, int, int]) -> Image.Image:
+    """255 where a pixel is the backdrop or a shadow on it: the backdrop colour scaled darker
+    (or a touch brighter) without turning cooler. A white product on a cream backdrop is
+    close in brightness but cooler, so it stays."""
+    total = sum(backdrop)
+    br, bg, bb = backdrop
+    r, g, b = (band.convert("F") for band in crop.split())
+
+    def test(a):
+        r, g, b = a["r"], a["g"], a["b"]
+        k = (r + g + b) / total
+        dr, dg, db = r - k * br, g - k * bg, b - k * bb
+        spread = a["max"](a["max"](abs(dr), abs(dg)), abs(db))
+        return ((dr - db) > -4) * (dg < 4) * (spread < 13) * (k > 0.45) * (k < 1.08) * 255
+
+    out = ImageMath.lambda_eval(test, r=r, g=g, b=b)
+    return out.convert("L")
+
+
+def _main_piece(mask: Image.Image) -> Image.Image:
+    """Keep the largest solid piece of a 0/255 mask; specks of backdrop are dropped."""
+    small = mask.resize((max(1, mask.width // 4), max(1, mask.height // 4)), Image.Resampling.NEAREST)
+    best, seen = None, small.copy()
+    for fy in (0.5, 0.4, 0.6, 0.3, 0.7):
+        for fx in (0.5, 0.35, 0.65):
+            xy = (int(small.width * fx), int(small.height * fy))
+            if seen.getpixel(xy) != 255:
+                continue
+            piece = small.copy()
+            ImageDraw.floodfill(piece, xy, 128)
+            piece = piece.point(lambda v: 255 if v == 128 else 0)
+            area = piece.histogram()[255]
+            ImageDraw.floodfill(seen, xy, 0)
+            if best is None or area > best[0]:
+                best = (area, piece)
+    if best is None:
+        return mask
+    keep = best[1].filter(ImageFilter.MaxFilter(5)).resize(mask.size, Image.Resampling.NEAREST)
+    return ImageChops.multiply(mask, keep)
+
+
+def _outline(crop: Image.Image, step: int = 10) -> Image.Image:
+    """255 on sharp brightness steps. A product's outline is sharp; a shadow fades softly,
+    so this keeps the flood out of a shaded product that is shadow-coloured."""
+    lum = crop.convert("L")
+    grad = ImageChops.lighter(
+        ImageChops.difference(lum, ImageChops.offset(lum, 2, 0)),
+        ImageChops.difference(lum, ImageChops.offset(lum, 0, 2)),
+    )
+    edge = grad.point(lambda v: 255 if v >= step else 0)
+    frame = Image.new("L", crop.size, 0)
+    frame.paste(edge.crop((2, 2, crop.width - 2, crop.height - 2)), (2, 2))
+    return frame.filter(ImageFilter.MaxFilter(7))
+
+
+def matte(image: Image.Image, box: Box) -> Image.Image:
+    """Cut the product out of a studio photo along its own edges.
+
+    SAM 3.1 gives the box. Inside it, backdrop and shadow pixels that join the border are
+    removed; what is left keeps its pixels, with a soft edge."""
+    if box.w <= 0 or box.h <= 0:
+        raise ValueError("Box reference frame must have positive dimensions")
+    pad_x = round(0.03 * (box.x2 - box.x1) * image.width / box.w)
+    pad_y = round(0.03 * (box.y2 - box.y1) * image.height / box.h)
+    x1 = max(0, round(box.x1 * image.width / box.w) - pad_x)
+    x2 = min(image.width, round(box.x2 * image.width / box.w) + pad_x)
+    y1 = max(0, round(box.y1 * image.height / box.h) - pad_y)
+    y2 = min(image.height, round(box.y2 * image.height / box.h) + pad_y)
+    if x2 <= x1 or y2 <= y1:
+        raise ValueError("Box has no area inside the image")
+    crop = image.convert("RGB").crop((x1, y1, x2, y2))
+    smooth = crop.filter(ImageFilter.MedianFilter(3))
+    like = ImageChops.subtract(_backdrop_like(smooth, _studio_color(image)), _outline(smooth))
+    # A one-pixel frame joins every border pixel to the flood seed.
+    near = Image.new("L", (crop.width + 2, crop.height + 2), 255)
+    near.paste(like, (1, 1))
+    ImageDraw.floodfill(near, (0, 0), 128)
+    outside = near.crop((1, 1, crop.width + 1, crop.height + 1)).point(
+        lambda v: 255 if v == 128 else 0)
+    alpha = _main_piece(ImageChops.invert(outside).filter(ImageFilter.MedianFilter(5)))
+    # Opening drops thin bits of backdrop stuck to the edge, then the edge is pulled in a little.
+    alpha = alpha.filter(ImageFilter.MinFilter(11)).filter(ImageFilter.MaxFilter(11))
+    alpha = _main_piece(alpha.filter(ImageFilter.MinFilter(5))).filter(ImageFilter.GaussianBlur(1.2))
+    found = alpha.point(lambda v: 255 if v > 24 else 0).getbbox()
+    if found is None:
+        raise ValueError("Nothing in the box stands out from the backdrop")
+    product = crop.convert("RGBA")
+    product.putalpha(alpha)
+    return product.crop(found)
+
+
+def _shadow(product: Image.Image, opacity: float = 0.42) -> tuple[Image.Image, tuple[int, int]]:
+    """A soft drop shadow for a cutout and where it sits relative to the cutout's corner."""
+    blur = max(2, round(0.035 * product.height))
+    pad = blur * 3
+    alpha = product.getchannel("A").point(lambda v: round(v * opacity))
+    layer = Image.new("L", (product.width + 2 * pad, product.height + 2 * pad), 0)
+    layer.paste(alpha, (pad, pad))
+    layer = layer.filter(ImageFilter.GaussianBlur(blur))
+    shadow = Image.new("RGBA", layer.size, (0, 0, 0, 0))
+    shadow.putalpha(layer)
+    return shadow, (-pad, -pad + round(0.03 * product.height))
+
+
+def place_product(canvas: Image.Image, product: Image.Image, xy: tuple[int, int]) -> None:
+    """Paste a cutout with its shadow onto an RGBA canvas, in place."""
+    shadow, (dx, dy) = _shadow(product)
+    canvas.alpha_composite(shadow, (xy[0] + dx, xy[1] + dy))
+    canvas.alpha_composite(product, xy)
+
+
+def scrim(size: tuple[int, int], depth: int, ink: tuple[int, int, int] = INK,
+          strength: int = 200, bottom: bool = False) -> Image.Image:
+    """A dark fade from one edge, so white words read on any background."""
+    _, height = size
+    fade = Image.new("L", (1, height), 0)
+    for y in range(min(depth, height)):
+        t = 1 - y / max(1, depth)
+        fade.putpixel((0, height - 1 - y if bottom else y), round(strength * t ** 1.4))
+    layer = Image.new("RGBA", size, (*ink, 0))
+    layer.putalpha(fade.resize(size))
+    return layer
 
 
 def product_box(image: Image.Image, threshold: int = 40) -> Box:
@@ -230,10 +372,43 @@ def _wrap_headline(text: str, font: ImageFont.FreeTypeFont, width: int) -> list[
     return [*lines, line] if line or not lines else lines
 
 
+def fit_headline(text: str, width: int, sizes=range(84, 43, -4), max_lines: int = 3):
+    """The largest bold size that fits the text in `max_lines`; trims with an ellipsis if none
+    does. Returns (font, lines)."""
+    for size in sizes:
+        face = font(size)
+        lines = _wrap_headline(text, face, width)
+        if len(lines) <= max_lines:
+            return face, lines
+    lines = lines[:max_lines]
+    last = lines[-1].rstrip()
+    while last and face.getlength(last + "...") > width:
+        last = last[:-1].rstrip()
+    lines[-1] = last + "..."
+    return face, lines
+
+
+def draw_lines(canvas: Image.Image, lines: list[str], face, xy: tuple[int, int],
+               fill="white", gap: float = 0.18) -> int:
+    """Draw left-aligned lines with a faint shadow and return the y below the last line."""
+    x, y = xy
+    ascent, descent = face.getmetrics()
+    step = round((ascent + descent) * (1 + gap))
+    shade = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    ImageDraw.Draw(shade).multiline_text((x, y + 2), "\n".join(lines), font=face,
+                                         fill=(0, 0, 0, 110), spacing=step - ascent - descent)
+    canvas.alpha_composite(shade.filter(ImageFilter.GaussianBlur(3)))
+    ImageDraw.Draw(canvas).multiline_text((x, y), "\n".join(lines), font=face, fill=fill,
+                                          spacing=step - ascent - descent)
+    return y + step * (len(lines) - 1) + ascent + descent
+
+
 def render_creative(
     background: Image.Image, product: Image.Image, headline: str, ratio: str,
+    brand: str | None = None, ink: tuple[int, int, int] = INK,
 ) -> Rendered:
-    """Compose a headline and product entirely inside the placement safe area."""
+    """Background scene, the headline on a dark fade at the top, the product below it.
+    Words and product stay inside the placement's safe area."""
     if ratio not in CREATIVE_SIZES:
         raise ValueError(f"Unknown creative ratio: {ratio}")
     output = ImageOps.fit(
@@ -242,41 +417,30 @@ def render_creative(
     top, right, bottom, left = SAFE_MARGINS[ratio]
     safe_width = output.width - left - right
     safe_bottom = output.height - bottom
-    padding, line_gap = 24, 8
-    text_width = safe_width - 2 * padding
-    for font_size in range(64, 35, -4):
-        font = ImageFont.load_default(size=font_size)
-        lines = _wrap_headline(headline, font, text_width)
-        if len(lines) <= 3:
-            break
-    if len(lines) > 3:
-        lines = lines[:3]
-        last = lines[-1].rstrip()
-        while last and font.getlength(last + "...") > text_width:
-            last = last[:-1].rstrip()
-        lines[-1] = last + "..."
-    line_height = max(font.getbbox(line or "Ag")[3] - font.getbbox(line or "Ag")[1]
-                      for line in lines)
-    band_height = 2 * padding + line_height * len(lines) + line_gap * (len(lines) - 1)
-    text_box = (left, top, output.width - right, top + band_height)
-    band = Image.new("RGBA", (safe_width, band_height), (15, 23, 30, 205))
-    draw = ImageDraw.Draw(band)
-    for index, line in enumerate(lines):
-        draw.text(
-            (padding, padding + index * (line_height + line_gap)), line,
-            font=font, fill="white", anchor="lt",
-        )
-    output.alpha_composite(band, (left, top))
 
-    product_top = text_box[3] + 24
-    remaining_height = safe_bottom - product_top
-    scale = min(0.8 * safe_width / product.width, 0.8 * remaining_height / product.height)
-    product_size = (max(1, int(product.width * scale)), max(1, int(product.height * scale)))
-    resized = product.convert("RGBA").resize(product_size, Image.Resampling.LANCZOS)
+    face, lines = fit_headline(headline, safe_width - 8)
+    label = font(30, bold=False) if brand else None
+    y = top
+    if label:
+        y += label.getmetrics()[0] + label.getmetrics()[1] + 14
+    text_bottom = y + (face.getmetrics()[0] + face.getmetrics()[1]) * len(lines) \
+        + round(0.18 * sum(face.getmetrics())) * (len(lines) - 1)
+    output.alpha_composite(scrim(output.size, text_bottom + round(0.22 * output.height), ink))
+    if label:
+        ImageDraw.Draw(output).text((left, top), brand.upper(), font=label,
+                                    fill=(255, 255, 255, 225))
+    end = draw_lines(output, lines, face, (left, y))
+    text_box = (left, top, left + safe_width, max(end, text_bottom))
+
+    product_top = text_box[3] + 40
+    room = safe_bottom - product_top
+    scale = min(0.72 * safe_width / product.width, 0.86 * room / product.height)
+    size = (max(1, int(product.width * scale)), max(1, int(product.height * scale)))
+    resized = product.convert("RGBA").resize(size, Image.Resampling.LANCZOS)
     x = left + (safe_width - resized.width) // 2
-    y = product_top + (remaining_height - resized.height) // 2
+    y = product_top + round((room - resized.height) * 0.62)
+    place_product(output, resized, (x, y))
     product_box = (x, y, x + resized.width, y + resized.height)
-    output.alpha_composite(resized, (x, y))
     return Rendered(output.convert("RGB"), product_box, text_box)
 
 

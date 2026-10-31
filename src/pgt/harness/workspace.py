@@ -12,7 +12,9 @@ from pgt.harness.ledger import EvidenceLedger
 
 class Workspace:
     def __init__(self, path: str | Path = ":memory:") -> None:
-        self._conn = sqlite3.connect(str(path), check_same_thread=False)
+        self._conn = sqlite3.connect(str(path), check_same_thread=False, timeout=30)
+        if str(path) != ":memory:":  # someone reading the file never stops the team writing
+            self._conn.execute("PRAGMA journal_mode=WAL")
         self.events = EventLog(self._conn)
         self.artifacts = ArtifactStore(self.events)
         self.facts = FactStore(self.events, self.artifacts)

@@ -96,14 +96,38 @@ function Body({ d }: { d: D }) {
   }
   if (d.creative) {
     const c = d.creative.ad_copy;
+    const video = d.creative.video;
+    const scenes = d.creative.images.filter((i) => i.ratio === "1:1");
+    const angle = (i: Image) => c.scenes?.[(i.variant ?? 1) - 1]?.angle;
     parts.push(
       <div key="copy" className="col" style={{ gap: 10 }}>
         <div className="copy"><div className="k">Headline</div>{c.headline}</div>
         <div className="copy"><div className="k">Primary text</div>{c.primary_text}</div>
         <div className="copy"><div className="k">Description</div>{c.description}</div>
+        {c.video && c.video.hook && (
+          <div className="copy"><div className="k">Video storyboard</div>
+            <ol className="story">
+              <li><span className="t">0-3 s</span>{c.video.hook}</li>
+              <li><span className="t">3-6 s</span>{c.video.benefit}</li>
+              <li><span className="t">6-8.5 s</span>{c.video.proof}</li>
+              <li><span className="t">8.5-10 s</span>End card: {c.video.cta}</li>
+            </ol>
+          </div>
+        )}
       </div>,
-      <Images key="img" images={d.creative.images} caption={(i) => `${i.ratio} · ${i.width} x ${i.height}`} />,
+      <Images key="img" images={scenes.length > 1 ? scenes : d.creative.images}
+              caption={(i) => scenes.length > 1
+                ? `Scene ${i.variant ?? 1}${angle(i) ? ` · ${angle(i)}` : ""}`
+                : `${i.ratio} · ${i.width} x ${i.height}`} />,
     );
+    if (video?.url) {
+      parts.push(
+        <figure key="video" className="vid">
+          <video src={video.url} controls muted playsInline preload="metadata" />
+          <figcaption>10-second 9:16 video, assembled in code from the three scenes. Meta's model API has no video model.</figcaption>
+        </figure>,
+      );
+    }
   }
   const content = d.content as Record<string, any>;
   if (Array.isArray(content.findings)) {

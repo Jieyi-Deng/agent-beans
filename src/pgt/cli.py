@@ -136,9 +136,18 @@ def _serve(args) -> None:
 
     load_dotenv()  # Meta login settings; offline runs still never call a model
 
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_dir = Path("runs/web") / stamp
-    run_dir.mkdir(parents=True, exist_ok=True)
+    if args.db:  # the media lives next to the workspace it belongs to
+        run_dir = Path(args.db).with_suffix("")
+        run_dir.mkdir(parents=True, exist_ok=True)
+    else:  # a new folder; two servers started in the same second must not share one
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        for n in range(1, 100):
+            run_dir = Path("runs/web") / (stamp if n == 1 else f"{stamp}-{n}")
+            try:
+                run_dir.mkdir(parents=True)
+                break
+            except FileExistsError:
+                continue
     db = args.db or str(run_dir / "workspace.db")
     if args.live:
         team = live_team(db, str(run_dir / "media"), args.model, args.provider, args.effort,
@@ -217,7 +226,10 @@ async def _weekly(args) -> None:
             print(f'  {d.name} in {d.campaign_id}: "{copy["headline"]}"')
             print(f"    {copy['primary_text']}")
             folder = Path(creative["images"][0]["path"]).parent
-            print(f"    Images (1:1, 4:5, 9:16): {folder}")
+            scenes = len(copy.get("scenes", [])) or 1
+            print(f"    {scenes} scenes x 3 sizes (1:1, 4:5, 9:16): {folder}")
+            if creative.get("video"):
+                print(f"    10-second video: {creative['video']['path']}")
         if not _ask("Approve creating these ads, paused?", args.yes):
             print("Stopped before the sandbox. Nothing was changed.")
             return

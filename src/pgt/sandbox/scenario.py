@@ -22,6 +22,51 @@ class AdPerformance(BaseModel):
     avg_order_value: float | None = Field(default=None, gt=0)  # set for stores: revenue per result
 
 
+class Persona(BaseModel):
+    """Someone the ads speak to, and the moment they meet the ad."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    who: str
+    moment: str  # where and when they scroll past the ad
+    wants: str
+    doubts: str  # what stops them from tapping
+
+
+class ProductCard(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str  # matches a name in product_names()
+    what_it_is: str
+    selling_points: list[str]  # true of the product; prices only as the facts state them
+    how_to_show: str  # how the product reads best in a picture
+
+
+class CreativeKit(BaseModel):
+    """What a brand team would hand a creative producer on day one: the story, the people, the
+    season, the look. Sandbox stores ship with one; a connected account starts without."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    brand: str  # the name on the ads
+    brand_story: str
+    products: list[ProductCard]
+    personas: list[Persona]
+    season: str  # what is going on in the customer's life this month
+    offer: str  # the standing offer, worded as the facts allow
+    cta_buttons: list[str]  # Meta call-to-action buttons this advertiser uses
+    look: str  # light, settings, palette, camera
+    props: list[str]  # things that may appear in a scene
+    avoid: list[str]  # things that must never appear in a scene
+    colors: dict[str, str]  # hex: "brand" (panels), "ink" (dark text), "paper" (light text),
+    # "accent" (buttons and badges)
+    sign_off: str  # brand line on the video end card
+    # The brand's type, as "<file in creative/fonts>:<weight>": "display" for headlines and the
+    # wordmark, "text" for buttons and small print. Liberation Sans when not set.
+    fonts: dict[str, str] = {}
+    offer_badge: str = ""  # the offer in a few words, for the badge layout
+
+
 class Scenario(BaseModel):
     """A self-contained synthetic starting account, including its seed."""
 
@@ -38,6 +83,7 @@ class Scenario(BaseModel):
     product_photo: str | None = None  # file in sandbox/assets; None draws the demo phone
     product_concept: str = "phone"  # what SAM 3.1 looks for in the product photo
     other_products: dict[str, str] = {}  # more products with a photo: concept -> file in assets
+    creative: CreativeKit | None = None  # context for the Creative Producer and the Reviewer
 
 
 def fitness_app_scenario(seed: int = 7, plant_injection: bool = False) -> Scenario:
@@ -102,6 +148,7 @@ def fitness_app_scenario(seed: int = 7, plant_injection: bool = False) -> Scenar
         campaigns=campaigns,
         ads=ads,
         drafts=fitness_app_drafts(),
+        creative=fitness_app_kit(),
         performance={
             "ad_1": AdPerformance(base_ctr=0.024, audience_size=1_280),
             "ad_2": AdPerformance(),
@@ -131,9 +178,54 @@ def fitness_app_drafts() -> list[dict]:
     ]
 
 
+def fitness_app_kit() -> CreativeKit:
+    return CreativeKit(
+        brand="Pallas Fit",
+        brand_story="Pallas Fit is for people who keep meaning to work out and keep running out "
+        "of day. Every workout is 10 minutes, needs no gear, and fits beside the sofa. The app "
+        "counts a streak, not calories: showing up is the win.",
+        products=[ProductCard(
+            name="phone",
+            what_it_is="The Pallas Fit app on a phone, open on today's 10-minute workout",
+            selling_points=["10-minute workouts", "No equipment", "Daily streaks",
+                            "7-day free trial"],
+            how_to_show="In someone's hand or propped beside them mid-workout, screen "
+            "readable and turned toward the camera; it is the only device in the frame",
+        )],
+        personas=[
+            Persona(who="Office worker, 31, home by 7pm", moment="Scrolling on the sofa after "
+                    "dinner, the day's plan to exercise already slipping",
+                    wants="Something that counts and is done before the evening is gone",
+                    doubts="Has quit three apps before; thinks workouts mean an hour"),
+            Persona(who="Parent of two, 38", moment="Early morning, before the house wakes up",
+                    wants="A habit small enough to keep on a busy day",
+                    doubts="No room for gear and no time to drive to a gym"),
+        ],
+        season="Early November: the clocks have gone back, evenings are dark and cold, and "
+        "outdoor runs stop. People move workouts indoors and start thinking about a habit that "
+        "lasts past the holidays.",
+        offer="7-day free trial, cancel any time in the app",
+        cta_buttons=["Install Now", "Sign Up", "Try It"],
+        look="Candid lifestyle photography in warm, lived-in apartments at golden hour or "
+        "early morning: real people in comfortable athleisure, mid-movement or just finished, "
+        "relaxed rather than posed; soft window light; muted sage, cream and warm wood; 35mm, "
+        "eye level, shallow depth of field, gentle film grain",
+        props=["rolled yoga mat", "water bottle", "running shoes by the door", "houseplant",
+               "folded towel", "window with morning light", "small rug", "mug of tea"],
+        avoid=["gym machines", "scales or measuring tapes", "food or diet items",
+               "body-focused framing (abs, waists, shirtless)", "before/after framing",
+               "text or logos in the scene", "other phones or devices", "looking into the lens"],
+        colors={"brand": "#2F5D50", "ink": "#16211D", "paper": "#F6F2EA", "accent": "#E9B872"},
+        sign_off="Ten minutes counts.",
+        fonts={"display": "PlusJakartaSans:800", "text": "PlusJakartaSans:600"},
+        offer_badge="7 days free",
+    )
+
+
 def fitness_app_facts() -> SharedFacts:
     return SharedFacts(
-        product="Pallas Fit (synthetic demo app): 10-minute home workouts with daily streaks",
+        product="Pallas Fit (synthetic demo app): 10-minute home workouts with daily streaks "
+        "and a 7-day free trial",
         audience="Adults 25–40 who want short home workouts",
         goal="free-trial starts",
         result_name="trial",
@@ -217,6 +309,7 @@ def pet_store_scenario(seed: int = 7, plant_injection: bool = False) -> Scenario
         product_photo="harness.jpg",
         product_concept="dog harness",
         other_products={"cat water fountain": "fountain.jpg"},
+        creative=pet_store_kit(),
     )
 
 
@@ -236,6 +329,63 @@ def pet_store_drafts() -> list[dict]:
         {"id": "draft_ad_3", "level": "AD", "name": "Walk test – Owner video v2",
          "status": "DRAFT", "campaign_id": "cmp_3", "headline": "No more pulling on walks"},
     ]
+
+
+def pet_store_kit() -> CreativeKit:
+    return CreativeKit(
+        brand="Northpaw Supply",
+        brand_story="Northpaw Supply is a small online shop run by dog and cat people. It sells "
+        "a short list of gear it would use at home: things that make the daily walk calmer "
+        "and the water bowl fresher, built to last and priced plainly.",
+        products=[
+            ProductCard(
+                name="dog harness",
+                what_it_is="No-pull dog harness with a front clip, $38",
+                selling_points=["Front clip that steers a pulling dog to the side",
+                                "Padded chest plate", "Adjusts at four points",
+                                "Free shipping on orders over $50"],
+                how_to_show="Laid flat or standing as if worn, buckles and front clip visible; "
+                "keep its real colour and shape",
+            ),
+            ProductCard(
+                name="cat water fountain",
+                what_it_is="Ceramic cat water fountain with a quiet pump, $46",
+                selling_points=["Ceramic bowl that is easy to wash", "Quiet pump",
+                                "Moving water many cats prefer to a still bowl",
+                                "Free shipping on orders over $50"],
+                how_to_show="On a floor or low counter at a cat's eye level, water running",
+            ),
+        ],
+        personas=[
+            Persona(who="Dog owner, 34, city apartment", moment="Phone out after a tiring "
+                    "evening walk with a dog that pulls the whole way",
+                    wants="Walks that feel calm, without a training course",
+                    doubts="Has a drawer of gear that did not work"),
+            Persona(who="Cat owner, 45, works from home", moment="Refilling the water bowl "
+                    "again and noticing the cat ignores it",
+                    wants="A cat that drinks more and a bowl that stays clean",
+                    doubts="Worries a pump will be noisy or hard to clean"),
+            Persona(who="Gift buyer, 29", moment="Early holiday shopping on the commute",
+                    wants="A useful gift for a friend's new pet, under $50",
+                    doubts="Not sure what size or style to pick"),
+        ],
+        season="Early November: colder, darker walks before and after work, and the start of "
+        "holiday gift shopping. People buy early to beat shipping delays.",
+        offer="Free shipping on orders over $50",
+        cta_buttons=["Shop Now", "Learn More"],
+        look="Editorial lifestyle photography in natural daylight: real homes and "
+        "neighbourhood streets, pets caught mid-moment; autumn tones of rust, oat and deep "
+        "green; 35-50mm, shallow depth of field, soft shadows, warm film colour",
+        props=["leash hook by the front door", "autumn leaves on a path", "knit throw",
+               "wooden floor", "window light", "dog bed", "cat tree", "kraft gift box"],
+        avoid=["animals in distress", "vets, clinics or medical items",
+               "text, logos or price tags", "other brands' products",
+               "a second harness or fountain", "people's faces"],
+        colors={"brand": "#B4532A", "ink": "#1F1A17", "paper": "#FBF6EE", "accent": "#2E4A3B"},
+        sign_off="Gear for calmer days with your pet.",
+        fonts={"display": "Fraunces:600", "text": "DMSans:600"},
+        offer_badge="Free shipping over $50",
+    )
 
 
 def pet_store_facts() -> SharedFacts:

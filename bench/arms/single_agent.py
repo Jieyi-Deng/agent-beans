@@ -358,7 +358,7 @@ def scripted_step(body: dict, scenario: Scenario):
         if test_id not in made:
             return FunctionCall(
                 "make_images",
-                {"test_id": test_id, "headline": copy.headline, "image_prompt": copy.image_prompt},
+                {"test_id": test_id, "headline": copy.headline, "image_prompt": copy.scenes[0].prompt},
             )
 
     ads = [

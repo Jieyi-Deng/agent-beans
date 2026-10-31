@@ -1,6 +1,7 @@
 """Web API on the offline demo week: what waits on the owner, approvals, and the room."""
 
 import json
+import shutil
 import time
 
 import pytest
@@ -172,6 +173,7 @@ def test_dashboard_sums_the_insight_rows_and_pins_team_actions(client):
     assert client.get("/api/dashboard?days=14").json()["short"] is True
 
 
+@pytest.mark.video
 def test_assets_trace_each_creative_and_launch(client):
     assert [a["kind"] for a in client.get("/api/assets").json()["items"]] == []
     client.post("/api/approve/week1/test_plan")
@@ -184,6 +186,11 @@ def test_assets_trace_each_creative_and_launch(client):
     assert made[0]["steps"][1]["model"]["model"] == "SAM 3.1"
     assert made[0]["steps"][3]["model"]["model"] == "Muse Image"
     assert made[0]["image"].startswith("/api/media/week1/")
+    assert len(made[0]["images"]) == 9 and len(made[0]["scenes"]) == 3
+    if shutil.which("ffmpeg"):
+        assert made[0]["video"].endswith("/video.mp4")
+        assert "10-second video, assembled in code" in steps
+        assert client.get(made[0]["video"]).headers["content-type"] == "video/mp4"
     assert any(a["kind"] == "source" for a in items)
     client.post("/api/approve/week1/change_set")
     _idle(client)
@@ -421,3 +428,14 @@ def test_store_template_seeds_two_weeks_with_revenue(tmp_path):
         assert access["sandbox"]["name"] == "Northpaw Supply sandbox"
         assert c.get("/api/deliverables").json()["account_name"] == "Northpaw Supply sandbox"
     team.ws.close()
+
+
+def test_ad_titles_drop_a_leading_test_id():
+    from pgt.api.board import _ad_name
+
+    assert _ad_name("w1-t2 Fountain - Ceramic not plastic", "w1-t2") == "Fountain - Ceramic not plastic"
+    assert _ad_name("T1 - Time-fit for busy days", "w1-t1") == "Time-fit for busy days"
+    assert _ad_name("W1 - Harness padded comfort", "w1-t3") == "Harness padded comfort"
+    assert _ad_name("Tiny steps", "w1-t1") == "Tiny steps"
+    assert _ad_name("Week one", "w1-t1") == "Week one"
+    assert _ad_name(None, "w1-t1") == "w1-t1"
