@@ -42,7 +42,8 @@ Write one ad for one planned test:
 - a storyboard for the 10-second 9:16 video: hook (over scene 1), benefit (scene 2), proof
   (scene 3), each 34 characters at most, and the end-card button, one of the kit's cta_buttons.
 Short, concrete, specific words beat clever ones. Follow the brand voice and constraints. List
-every factual statement in claims with its evidence IDs or source URLs. If you need a number from
+every factual statement in claims with its evidence IDs or source URLs; for one the shared facts
+or the kit state (the price, the offer, what the product does), use the evidence ID "facts". If you need a number from
 the account, ask the analyst first; use only numbers that come back with evidence or that the
 facts or the kit's offer state."""
 

@@ -27,6 +27,7 @@ VIDEO_LIMITS: dict[str, int] = {"hook": 34, "benefit": 34, "proof": 34, "cta": 2
 SCENES = 3
 VARIANTS = SCENES
 WORDS_LIMIT = 40  # the line set on each picture
+OWN_FACTS = "facts"  # the evidence ID for what the advertiser's own facts and kit state
 # The share of the product the words may sit on, and the share that must stay in the frame.
 MAX_COVERED = 0.15  # share of the product the words may sit on before the shot goes back
 MIN_SHOWN = 0.85
@@ -112,8 +113,11 @@ def check_copy(
     candidates = list(fact_numbers)
     for index, claim in enumerate(ad_copy.claims):
         if not claim.evidence_ids and not claim.source_urls:
-            issues.append(f"Claim {index} has no evidence IDs or source URLs.")
+            issues.append(f"Claim {index} has no evidence IDs or source URLs; cite "
+                          f"\"{OWN_FACTS}\" when the shared facts or the kit state it.")
         for evidence_id in claim.evidence_ids:
+            if evidence_id == OWN_FACTS:  # numbers in it still have to match the facts
+                continue
             evidence = ledger.get(evidence_id)
             if evidence is None:
                 issues.append(f"Claim {index} cites unknown evidence {evidence_id}.")

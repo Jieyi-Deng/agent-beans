@@ -88,14 +88,17 @@ def test_offline_edit_puts_the_reference_product_in_the_scene():
     assert "image" not in fake.requests[-1]
 
 
-def test_a_tall_product_the_panel_would_cut_off_gets_another_layout():
-    image = Image.new("RGB", (1024, 1536), (214, 200, 178))
-    tall = Box(380, 330, 660, 1030, 1024, 1536)  # a fountain nearly half the shot's height
+@pytest.mark.parametrize("ratio", ["1:1", "4:5"])
+def test_a_tall_product_moves_the_panel_into_a_column_beside_the_photo(ratio):
+    image = Image.new("RGB", (1280, 1920), (214, 200, 178))
+    tall = Box(400, 300, 880, 1560, 1280, 1920)  # a fountain two thirds of the shot's height
     ImageDraw.Draw(image).rectangle((tall.x1, tall.y1, tall.x2, tall.y2), fill=(30, 34, 40))
     style = Style.from_kit(pet_store_kit(), "Shop Now")
-    design = compose(image, tall, "1:1", "panel", "Fresh water all day", style)
-    assert design.layout != "panel"
-    assert check_design("cat water fountain", [(3, "1:1", design)]) == []
+    design = compose(image, tall, ratio, "panel", "Fresh water all day, every day", style)
+    assert design.layout == "panel" and design.product_shown >= 0.95
+    assert design.image.getpixel((20, design.image.height // 2)) == style.panel  # the column
+    assert design.product_box[0] >= 540 > max(box[2] for box in design.text_boxes)
+    assert check_design("cat water fountain", [(3, ratio, design)]) == []
 
 
 def test_the_9x16_panel_keeps_the_photo_under_the_reels_buttons():

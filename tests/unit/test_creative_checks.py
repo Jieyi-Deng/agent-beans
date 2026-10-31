@@ -143,10 +143,23 @@ def test_copy_claims_need_known_support(ledger):
         ]
     )
     issues = check_copy(bad, ledger, [7, 10], {"https://found.example/a"})
-    assert "Claim 1 has no evidence IDs or source URLs." in issues
+    assert ('Claim 1 has no evidence IDs or source URLs; cite "facts" when the shared facts or '
+            "the kit state it.") in issues
     assert "Claim 2 cites unknown evidence ev-nope." in issues
     assert "Claim 2 cites a source URL that research did not find: https://made.up/x." in issues
     assert len(issues) == 3
+
+
+def test_copy_claims_may_cite_the_advertisers_own_facts(ledger):
+    own = copy(primary_text="A 7-day free trial, cancel any time.", headline="Start today",
+               claims=[Claim(text="7-day free trial", evidence_ids=["facts"], source_urls=[])])
+    assert check_copy(own, ledger, [7], set()) == []
+    # Citing the facts does not let a number through that the facts do not state.
+    made_up = copy(primary_text="A 30-day free trial, cancel any time.", headline="Start today",
+                   claims=[Claim(text="30-day free trial", evidence_ids=["facts"],
+                                 source_urls=[])])
+    assert check_copy(made_up, ledger, [7], set()) == [
+        "Number 30 in primary_text matches no cited evidence or shared fact."]
 
 
 def write_image(tmp_path, ratio, size=None):

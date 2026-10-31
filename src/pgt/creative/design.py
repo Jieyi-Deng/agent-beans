@@ -552,34 +552,48 @@ def _poster(ratio: str, words: str, style: Style, side: str, offer: bool) -> _Pl
 
 def _panel(photo: Image.Image, rect, focus, ratio: str, words: str, style: Style) -> Design:
     """The photo on top, a brand-colour panel with the words below. The words end at the bottom
-    of the safe zone and the panel runs on to the edge. In 9:16 that would leave the lower third
-    a flat block of colour under the Reels buttons, so the panel becomes a card instead."""
+    of the safe zone and the panel runs on to the edge. When a tall product would be cut off up
+    there, the panel becomes a column on the left and the photo runs full height beside it. In
+    9:16 the panel would leave the lower third a flat block of colour under the Reels buttons, so
+    it becomes a card instead."""
     if ratio == "9:16":
         return _card(photo, rect, focus, words, style)
     width, height = CREATIVE_SIZES[ratio]
-    left, _, right, bottom = safe_rect(ratio)
+    left, top, right, bottom = safe_rect(ratio)
     pad = 56
-    face, lines, head_h, cta_size, mark_size, content = _panel_content(
-        ratio, words, style, right - left)
-    panel_top = bottom - content - pad
-    photo_size = (width, panel_top)
+    below = _panel_content(ratio, words, style, right - left)
+    column = width // 2
+    beside = _panel_content(ratio, words, style, column - left - pad)
+    options = [  # (rank, photo region's corner, its size)
+        (0, (0, 0), (width, bottom - below[-1] - pad)),
+        (1, (column, 0), (width - column, height)),
+    ]
     best = None
-    for zoom in (1.0, 1.15):
-        crop = crop_box(photo.size, photo_size, focus, (0.5, 0.52), zoom)
-        placed = _map(rect, crop, (0, 0), photo_size) if rect else None
-        score = (1 - shown(placed, (0, 0, *photo_size)), zoom)
-        if best is None or score < best[0]:
-            best = (score, crop, placed)
-    _, crop, placed = best
+    for rank, corner, region in options:
+        for zoom in (1.0, 1.15):
+            crop = crop_box(photo.size, region, focus, (0.5, 0.52), zoom)
+            placed = _map(rect, crop, corner, region) if rect else None
+            seen = shown(placed, (*corner, corner[0] + region[0], corner[1] + region[1]))
+            score = (round(1 - seen, 2), rank, zoom)
+            if best is None or score < best[0]:
+                best = (score, rank, corner, region, crop, placed, seen)
+    _, rank, corner, region, crop, placed, seen = best
     canvas = Image.new("RGBA", (width, height), (*style.panel, 255))
-    canvas.paste(photo.convert("RGB").resize(photo_size, Image.Resampling.LANCZOS, box=crop),
-                 (0, 0))
+    canvas.paste(photo.convert("RGB").resize(region, Image.Resampling.LANCZOS, box=crop), corner)
     d = ImageDraw.Draw(canvas)
-    d.rectangle((0, panel_top, width, panel_top + 6), fill=style.accent)
-    drawn = _set_panel(d, style, left, panel_top + pad, mark_size, face, lines, head_h, cta_size)
+    if rank == 0:
+        face, lines, head_h, cta_size, mark_size, content = below
+        panel_top = region[1]
+        d.rectangle((0, panel_top, width, panel_top + 6), fill=style.accent)
+        drawn = _set_panel(d, style, left, panel_top + pad, mark_size, face, lines, head_h,
+                           cta_size)
+    else:
+        face, lines, head_h, cta_size, mark_size, content = beside
+        d.rectangle((column - 6, 0, column, height), fill=style.accent)
+        y = max(top, (height - content) // 2)
+        drawn = _set_panel(d, style, left, y, mark_size, face, lines, head_h, cta_size)
     low = contrast(style.on(style.panel), style.panel)
-    return Design(canvas.convert("RGB"), "panel", placed, tuple(drawn), low,
-                  shown(placed, (0, 0, *photo_size)))
+    return Design(canvas.convert("RGB"), "panel", placed, tuple(drawn), low, seen if rect else 1.0)
 
 
 def _panel_content(ratio: str, words: str, style: Style, width: int):
