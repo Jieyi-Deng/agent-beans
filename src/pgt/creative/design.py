@@ -86,10 +86,15 @@ def wrap(text: str, face: ImageFont.FreeTypeFont, width: int) -> list[str]:
     best = lines
     for narrower in range(width - 24, width // 2, -24):
         trial = _wrap_headline(text, face, narrower)
-        if len(trial) > len(lines):
+        if len(trial) > len(lines) or not whole_words(trial, text):
             break
         best = trial
     return best
+
+
+def whole_words(lines: list[str], text: str) -> bool:
+    """No word is broken across two lines."""
+    return " ".join(lines).split() == text.split()
 
 
 def fit_text(text: str, spec: str, width: int, sizes: range, max_lines: int):
@@ -97,6 +102,11 @@ def fit_text(text: str, spec: str, width: int, sizes: range, max_lines: int):
     ellipsis when none does. Returns (face, lines)."""
     face, lines = type_face(spec, sizes[0]), [text]
     for size in sizes:
+        face = type_face(spec, size)
+        lines = wrap(text, face, width)
+        if len(lines) <= max_lines and whole_words(lines, text):
+            return face, lines
+    for size in sizes:  # no size keeps every word whole: accept a split word over trimming
         face = type_face(spec, size)
         lines = wrap(text, face, width)
         if len(lines) <= max_lines:

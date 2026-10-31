@@ -9,7 +9,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from pgt.creative.compose import Box, make_demo_product_shot, png_bytes, product_box
-from pgt.creative.design import MIN_CONTRAST, Style, compose, covered, safe_rect
+from pgt.creative.design import MIN_CONTRAST, Style, compose, covered, fit_text, safe_rect
 from pgt.harness.creative_checks import check_design
 from pgt.llm.offline import offline_model
 from pgt.sandbox.scenario import fitness_app_kit, pet_store_kit
@@ -149,3 +149,11 @@ def test_the_9x16_panel_moves_its_words_onto_a_strip_when_the_product_is_big():
     assert design.product_box[1] > max(box[3] for box in design.text_boxes)  # photo below it
     assert design.product_shown >= 0.95
     assert check_design("cat water fountain", [(1, "9:16", design)]) == []
+
+
+def test_words_are_never_split_across_lines_when_a_smaller_size_fits():
+    style = Style.from_kit(fitness_app_kit(), "Try It")
+    text = "Beginner-friendly, timed for you"
+    for width in (560, 700, 800, 950):
+        _, lines = fit_text(text, style.display, width, range(104, 59, -4), 3)
+        assert " ".join(lines).split() == text.split(), (width, lines)
