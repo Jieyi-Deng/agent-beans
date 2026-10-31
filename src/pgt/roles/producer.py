@@ -99,7 +99,9 @@ COMPOSITION = {
     "band": "Keep the bottom third of the frame calm and simple (floor, table, wall or path) "
     "with the subject and the product in the upper two thirds.",
     "offer": "Keep the bottom third of the frame calm and simple (floor, table, wall or path) "
-    "with the subject and the product in the upper two thirds.",
+    "with the subject and the product in the upper two thirds, left of centre. Leave the top "
+    "right corner empty (plain wall, window or shelf) for a round offer badge: no face, hand or "
+    "product there.",
     "panel": "Frame the subject a little above centre with room around it on every side.",
     "poster": "Keep the top third of the frame calm and simple (sky, wall or soft background) "
     "with the subject and the product in the lower half.",

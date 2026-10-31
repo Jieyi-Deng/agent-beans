@@ -54,7 +54,8 @@ Look at the attached sheet and send the ad back only for something the Producer 
   or a scene shows more than one of it;
 - visible AI faults: warped hands, faces or paws, melted objects, gibberish text or logos in
   the photo itself;
-- words that are hard to read, or that hide a face or the product;
+- words that are hard to read, or words, the button or the offer badge covering a face or the
+  product;
 - anything off the creative kit (persona, season, look) or on its avoid list;
 - three shots that do not tell one story, or a storyboard that does not follow them.
 List each fix as one plain line that says which scene and what to change. A claim that cites
