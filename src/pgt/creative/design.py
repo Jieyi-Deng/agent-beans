@@ -7,9 +7,13 @@ the words in the brand's fonts, darkens the photo under them only as much as rea
 
 Layouts:
 - band: the photo full bleed, the headline and button in a band along the bottom (or top) edge;
-- panel: the photo above a solid brand-colour panel that holds the words;
-- poster: large editorial type over a calm part of the photo, wordmark and button below;
+- panel: the photo above a solid brand-colour panel that holds the words (in 9:16, the photo full
+  bleed and the words on a brand-colour card);
+- poster: large editorial type over a calm part of the photo (top or bottom), wordmark and button;
 - offer: band, plus a round badge with the offer.
+
+When the chosen layout would cut the product off or set words on it, compose tries the others and
+keeps the one that shows the product best.
 """
 
 from __future__ import annotations
@@ -384,9 +388,36 @@ class _Plan:
     draw: object  # callable(canvas) -> (canvas, boxes, contrast)
 
 
+FIT_COVERED = 0.02  # words may touch this share of the product before another layout is tried
+FIT_SHOWN = 0.95  # share of the product that must stay in the picture
+
+
+def misfit(design: Design) -> float:
+    """How badly a layout treats the product: the share under words plus the share cut off,
+    which counts twice, since a cropped product reads as a mistake and a touched one does not."""
+    return covered(design.product_box, design.text_boxes) + 2 * (1 - design.product_shown)
+
+
 def compose(photo: Image.Image, product: Box | None, ratio: str, layout: str, words: str,
             style: Style) -> Design:
-    """Set `words` over `photo` in one layout and one placement size."""
+    """Set `words` over `photo` in `layout` and one placement size. When that layout would cut
+    the product off or set words on it, try the others and keep the one that shows it best."""
+    first = _compose(photo, product, ratio, layout, words, style)
+    if product is None or (first.product_shown >= FIT_SHOWN
+                           and covered(first.product_box, first.text_boxes) <= FIT_COVERED):
+        return first
+    best = first
+    for other in LAYOUTS:
+        if other == first.layout or (other == "offer" and not style.badge):
+            continue
+        trial = _compose(photo, product, ratio, other, words, style)
+        if misfit(trial) < misfit(best) - 0.02:
+            best = trial
+    return best
+
+
+def _compose(photo: Image.Image, product: Box | None, ratio: str, layout: str, words: str,
+             style: Style) -> Design:
     if layout not in LAYOUTS:
         layout = "band"
     if layout == "offer" and not style.badge:
@@ -397,7 +428,7 @@ def compose(photo: Image.Image, product: Box | None, ratio: str, layout: str, wo
     if layout == "panel":
         return _panel(photo, rect, focus, ratio, words, style)
     best = None
-    sides = ("bottom", "top") if layout != "poster" else ("top",)
+    sides = ("bottom", "top") if layout != "poster" else ("top", "bottom")
     for side in sides:
         plan = (_poster if layout == "poster" else _band)(ratio, words, style, side,
                                                           layout == "offer")
@@ -406,7 +437,7 @@ def compose(photo: Image.Image, product: Box | None, ratio: str, layout: str, wo
             crop = crop_box(photo.size, size, focus, target, zoom)
             placed = _map(rect, crop, (0, 0), size) if rect else None
             score = (round(covered(placed, plan.boxes), 2) + (1 - shown(placed, (0, 0, *size))),
-                     side != "bottom", zoom)
+                     side != sides[0], zoom)
             if best is None or score < best[0]:
                 best = (score, plan, crop, placed)
     _, plan, crop, placed = best
@@ -431,30 +462,31 @@ def _band(ratio: str, words: str, style: Style, side: str, offer: bool) -> _Plan
     pw, ph = pill_size(style, cta_size, style.cta)
     mark_size = 38
     gap = 30
+    diameter = round(0.22 * width)
     if side == "bottom":
         pill_xy = (left, bottom - ph)
         head_top = pill_xy[1] - gap - head_h
         mark_xy = (left, top)
         corner_y = top
         free = (top + 60, head_top - 40)
-    else:
-        head_top = top
+    else:  # one group at the top: wordmark, headline, button
+        mark_xy = (left, top)
+        head_top = top + (mark_size + 28 if style.brand else 0)
         pill_xy = (left, head_top + head_h + gap)
-        mark_xy = (left, bottom - round(mark_size * 0.98))
-        corner_y = bottom - round(0.22 * width)
-        free = (pill_xy[1] + ph + 40, bottom - 60)
+        corner_y = bottom - diameter
+        free = (pill_xy[1] + ph + 40, bottom - 20)
     head_box = (left, head_top, right, head_top + head_h)
     pill_box = (pill_xy[0], pill_xy[1], pill_xy[0] + pw, pill_xy[1] + ph)
     mark_box = (left, mark_xy[1], left + round(width * 0.4), mark_xy[1] + mark_size)
-    diameter = round(0.22 * width)
     badge_box = (right - diameter, corner_y, right, corner_y + diameter)
-    boxes = [head_box, pill_box] + ([badge_box] if offer else [])
+    boxes = [head_box, pill_box] + ([mark_box] if style.brand else []) + \
+        ([badge_box] if offer else [])
 
     def draw(canvas: Image.Image):
-        canvas, low = legible(canvas, head_box, side, style.paper, style.ink, start=0.3)
-        mark_side = "top" if side == "bottom" else "bottom"
-        if style.brand:
-            canvas, mark_low = legible(canvas, mark_box, mark_side, style.paper, style.ink)
+        words = head_box if side == "bottom" else (left, top, right, head_box[3])
+        canvas, low = legible(canvas, words, side, style.paper, style.ink, start=0.3)
+        if style.brand and side == "bottom":
+            canvas, mark_low = legible(canvas, mark_box, "top", style.paper, style.ink)
             low = min(low, mark_low)
         d = ImageDraw.Draw(canvas)
         drawn = [draw_block(d, lines, face, (left, head_top), style.paper)]
@@ -470,18 +502,31 @@ def _band(ratio: str, words: str, style: Style, side: str, offer: bool) -> _Plan
 
 
 def _poster(ratio: str, words: str, style: Style, side: str, offer: bool) -> _Plan:
+    """Big type across the top (or just above the bottom row when the product sits high), the
+    wordmark and button in a row along the bottom. In 9:16 the safe zone ends mid-frame, so with
+    the type on top the row moves up under it and the product gets the lower half."""
     left, top, right, bottom = safe_rect(ratio)
     face, lines = fit_text(words, style.display, right - left, _headline_sizes(ratio, True), 3)
     head_h = block_height(face, lines, 1.0)
-    head_box = (left, top, right, top + head_h)
     cta_size = 34 if ratio != "9:16" else 36
     pw, ph = pill_size(style, cta_size, style.cta)
-    pill_xy = (right - pw, bottom - ph)
-    pill_box = (pill_xy[0], pill_xy[1], right, bottom)
     mark_size = 38
-    mark_xy = (left, pill_xy[1] + (ph - round(mark_size * 0.74)) // 2)
-    mark_box = (left, pill_xy[1], pill_xy[0] - 24, bottom)
-    free = (top + head_h + 40, pill_xy[1] - 30)
+    raised = side == "top" and ratio == "9:16"
+    row_y = top + head_h + 36 if raised else bottom - ph
+    pill_xy = (right - pw, row_y)
+    pill_box = (pill_xy[0], row_y, right, row_y + ph)
+    mark_xy = (left, row_y + (ph - round(mark_size * 0.74)) // 2)
+    mark_box = (left, row_y, pill_xy[0] - 24, row_y + ph)
+    if raised:
+        head_top = top
+        free = (row_y + ph + 40, bottom - 20)
+    elif side == "top":
+        head_top = top
+        free = (top + head_h + 40, row_y - 30)
+    else:
+        head_top = row_y - 40 - head_h
+        free = (top + 40, head_top - 40)
+    head_box = (left, head_top, right, head_top + head_h)
 
     def draw(canvas: Image.Image):
         # Ink words on a light sky, paper words on a dark one; then wash only if needed.
@@ -489,33 +534,33 @@ def _poster(ratio: str, words: str, style: Style, side: str, offer: bool) -> _Pl
         paper_score = backdrop_contrast(canvas, head_box, style.paper)
         color, wash = (style.ink, style.paper) if ink_score > paper_score else \
             (style.paper, style.ink)
-        canvas, low = legible(canvas, head_box, "top", color, wash)
-        mark_color = style.paper
-        if style.brand:
+        words = (left, top, right, row_y + ph) if raised else head_box
+        canvas, low = legible(canvas, words, side, color, wash)
+        mark_color = color if raised else style.paper
+        if style.brand and not raised:
             canvas, mark_low = legible(canvas, mark_box, "bottom", mark_color, style.ink)
             low = min(low, mark_low)
         d = ImageDraw.Draw(canvas)
-        drawn = [draw_block(d, lines, face, (left, top), color, tight=1.0)]
+        drawn = [draw_block(d, lines, face, (left, head_top), color, tight=1.0)]
         drawn.append(pill(d, style, pill_xy, cta_size, style.accent, style.cta))
         if style.brand:
             drawn.append(wordmark(d, style, mark_xy, mark_size, mark_color))
         return canvas, drawn, low
 
-    return _Plan([head_box, pill_box], free, draw)
+    return _Plan([head_box, pill_box] + ([mark_box] if style.brand else []), free, draw)
 
 
 def _panel(photo: Image.Image, rect, focus, ratio: str, words: str, style: Style) -> Design:
     """The photo on top, a brand-colour panel with the words below. The words end at the bottom
-    of the safe zone (in 9:16, above the Reels buttons) and the panel runs on to the edge."""
+    of the safe zone and the panel runs on to the edge. In 9:16 that would leave the lower third
+    a flat block of colour under the Reels buttons, so the panel becomes a card instead."""
+    if ratio == "9:16":
+        return _card(photo, rect, focus, words, style)
     width, height = CREATIVE_SIZES[ratio]
     left, _, right, bottom = safe_rect(ratio)
     pad = 56
-    face, lines = fit_text(words, style.display, right - left, _headline_sizes(ratio, False), 3)
-    head_h = block_height(face, lines)
-    cta_size = 34 if ratio != "9:16" else 36
-    ph = pill_size(style, cta_size, style.cta)[1]
-    mark_size = 34
-    content = round(mark_size * 0.98) + 28 + head_h + 32 + ph
+    face, lines, head_h, cta_size, mark_size, content = _panel_content(
+        ratio, words, style, right - left)
     panel_top = bottom - content - pad
     photo_size = (width, panel_top)
     best = None
@@ -531,15 +576,65 @@ def _panel(photo: Image.Image, rect, focus, ratio: str, words: str, style: Style
                  (0, 0))
     d = ImageDraw.Draw(canvas)
     d.rectangle((0, panel_top, width, panel_top + 6), fill=style.accent)
-    color = style.on(style.panel)
-    y = panel_top + pad
-    drawn = []
-    if style.brand:
-        drawn.append(wordmark(d, style, (left, y), mark_size, color))
-    y += round(mark_size * 0.98) + 28
-    drawn.append(draw_block(d, lines, face, (left, y), color))
-    y += head_h + 32
-    drawn.append(pill(d, style, (left, y), cta_size, color, style.cta, style.panel))
-    low = contrast(color, style.panel)
+    drawn = _set_panel(d, style, left, panel_top + pad, mark_size, face, lines, head_h, cta_size)
+    low = contrast(style.on(style.panel), style.panel)
     return Design(canvas.convert("RGB"), "panel", placed, tuple(drawn), low,
                   shown(placed, (0, 0, *photo_size)))
+
+
+def _panel_content(ratio: str, words: str, style: Style, width: int):
+    face, lines = fit_text(words, style.display, width, _headline_sizes(ratio, False), 3)
+    head_h = block_height(face, lines)
+    cta_size = 34 if ratio != "9:16" else 36
+    ph = pill_size(style, cta_size, style.cta)[1]
+    mark_size = 34
+    content = (round(mark_size * 0.98) + 28 if style.brand else 0) + head_h + 32 + ph
+    return face, lines, head_h, cta_size, mark_size, content
+
+
+def _set_panel(d: ImageDraw.ImageDraw, style: Style, x: int, y: int, mark_size: int, face,
+               lines: list[str], head_h: int, cta_size: int) -> list[Rect]:
+    color = style.on(style.panel)
+    drawn = []
+    if style.brand:
+        drawn.append(wordmark(d, style, (x, y), mark_size, color))
+        y += round(mark_size * 0.98) + 28
+    drawn.append(draw_block(d, lines, face, (x, y), color))
+    y += head_h + 32
+    drawn.append(pill(d, style, (x, y), cta_size, color, style.cta, style.panel))
+    return drawn
+
+
+def _card(photo: Image.Image, rect, focus, words: str, style: Style) -> Design:
+    """9:16 panel: the photo full bleed, the words on a brand-colour card at the bottom of the safe
+    zone (or the top, when the product sits low). The product sits in the open photo."""
+    size = CREATIVE_SIZES["9:16"]
+    _, top, _, bottom = safe_rect("9:16")
+    inset, pad = 40, 48
+    x = inset + pad
+    face, lines, head_h, cta_size, mark_size, content = _panel_content(
+        "9:16", words, style, size[0] - 2 * x)
+    frame = (0, 0, *size)
+    best = None
+    for side in ("bottom", "top"):
+        if side == "bottom":
+            card = (inset, bottom - content - pad, size[0] - inset, bottom + pad)
+            free = (top, card[1])
+        else:
+            card = (inset, top - pad, size[0] - inset, top + content + pad)
+            free = (card[3], bottom)
+        for zoom in (1.0, 1.15, 1.3):
+            target = (0.5, (free[0] + free[1]) / 2 / size[1])
+            crop = crop_box(photo.size, size, focus, target, zoom)
+            placed = _map(rect, crop, (0, 0), size) if rect else None
+            seen = max(0.0, shown(placed, frame) - covered(placed, [card]))
+            score = (round(1 - seen, 2), side != "bottom", zoom)
+            if best is None or score < best[0]:
+                best = (score, card, crop, placed, seen)
+    _, card, crop, placed, seen = best
+    canvas = photo.convert("RGB").resize(size, Image.Resampling.LANCZOS, box=crop).convert("RGBA")
+    d = ImageDraw.Draw(canvas)
+    d.rounded_rectangle(card, radius=32, fill=style.panel)
+    drawn = _set_panel(d, style, x, card[1] + pad, mark_size, face, lines, head_h, cta_size)
+    low = contrast(style.on(style.panel), style.panel)
+    return Design(canvas.convert("RGB"), "panel", placed, tuple(drawn), low, seen if rect else 1.0)

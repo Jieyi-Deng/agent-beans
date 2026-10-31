@@ -28,7 +28,7 @@ SCENES = 3
 VARIANTS = SCENES
 WORDS_LIMIT = 40  # the line set on each picture
 # The share of the product the words may sit on, and the share that must stay in the frame.
-MAX_COVERED = 0.25
+MAX_COVERED = 0.15  # share of the product the words may sit on before the shot goes back
 MIN_SHOWN = 0.85
 
 _NUMBER = re.compile(
@@ -305,7 +305,8 @@ def check_design(product: str, designs) -> list[str]:
         elif design.layout != "panel" and _covered(design) > MAX_COVERED:
             calm = "top third" if design.layout == "poster" else "lower third"
             issues.append(f"{where}: the words sit on the {product}. Keep the {calm} of the "
-                          "photo calm and the product out of it, or choose another layout.")
+                          "photo calm and the product out of it, show it smaller (about a third "
+                          "of the frame's height), or choose another layout.")
         if design.contrast < MIN_CONTRAST - 0.05:
             issues.append(f"{where}: the words read at only {design.contrast:.1f}:1 against the "
                           "photo; ask for a calmer, simpler backdrop where they sit.")

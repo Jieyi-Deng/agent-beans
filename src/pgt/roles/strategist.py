@@ -17,6 +17,10 @@ You study how competitors and the category advertise, then suggest angles and ho
 testing. Search the web for current examples. Every claim about the market needs a source link
 you actually found; never invent a URL. Respect the brand voice and the constraints in the facts."""
 
+# Each search adds its results to the context, so a long search spree gets expensive fast:
+# 22 searches once cost $0.54 in one call. Eight is enough for three to five sourced insights.
+MAX_SEARCHES = 8
+
 
 async def run_research(
     scope: Scope,
@@ -42,11 +46,13 @@ async def run_research(
         + (" Every review issue is fixed." if issues else ""),
         data=data,
     )
-    capabilities = []
+    capabilities, settings = [], None
     if check_tool("strategist", "web_search", scope.ws.events, scope.loop_id) is None:
         capabilities.append(WebSearch(search_context_size="low", local=False))
+        settings = {"extra_body": {"max_tool_calls": MAX_SEARCHES}}
     run = await run_role_full(
-        "strategist", MarketResearch, pack, scope, model, capabilities=capabilities
+        "strategist", MarketResearch, pack, scope, model, capabilities=capabilities,
+        settings=settings,
     )
     return _fill_sources(run)
 

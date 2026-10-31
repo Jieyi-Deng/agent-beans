@@ -92,6 +92,31 @@ def test_repeated_identical_tool_call_is_cut_short():
     assert len(ws.events.list("model.call")) == 4
 
 
+def test_a_model_that_ignores_the_repeat_warning_loses_its_tools():
+    ran = []
+
+    def get_evidence(evidence_id: str) -> str:
+        """Read one evidence row."""
+        ran.append(evidence_id)
+        return "row"
+
+    def responder(body):
+        if not body.get("tools"):
+            return Findings(findings=[])
+        return FunctionCall("get_evidence", {"evidence_id": "ev-1"})  # never takes the hint
+
+    fake = MetaFake(responder)
+    ws = Workspace()
+    scope = Scope(ws, CostMeter(ws.events), "loop-1", 1)
+    out = asyncio.run(
+        run_role("analyst", Findings, pack(), scope, responses_model(fake.client()), [get_evidence])
+    )
+    assert out == Findings(findings=[])
+    assert ran == ["ev-1", "ev-1"]
+    assert len(ws.events.list("model.call")) == 4
+    assert fake.violations == []
+
+
 def test_call_to_a_tool_the_role_was_never_given_is_logged():
     # A prompt injection asks for a write tool the role does not have: the attempt is logged
     # once, nothing runs, and the role still finishes.

@@ -136,9 +136,18 @@ def _serve(args) -> None:
 
     load_dotenv()  # Meta login settings; offline runs still never call a model
 
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_dir = Path("runs/web") / stamp
-    run_dir.mkdir(parents=True, exist_ok=True)
+    if args.db:  # the media lives next to the workspace it belongs to
+        run_dir = Path(args.db).with_suffix("")
+        run_dir.mkdir(parents=True, exist_ok=True)
+    else:  # a new folder; two servers started in the same second must not share one
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        for n in range(1, 100):
+            run_dir = Path("runs/web") / (stamp if n == 1 else f"{stamp}-{n}")
+            try:
+                run_dir.mkdir(parents=True)
+                break
+            except FileExistsError:
+                continue
     db = args.db or str(run_dir / "workspace.db")
     if args.live:
         team = live_team(db, str(run_dir / "media"), args.model, args.provider, args.effort,

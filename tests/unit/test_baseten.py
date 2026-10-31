@@ -10,7 +10,7 @@ from openai import AsyncOpenAI
 from pgt.harness.context import assemble
 from pgt.harness.policy import CostMeter
 from pgt.harness.workspace import Workspace
-from pgt.llm.baseten import BASETEN_MODEL, baseten_client, chat_model
+from pgt.llm.baseten import BASETEN_MODEL, MAX_OUTPUT, baseten_client, chat_model
 from pgt.llm.fake import MetaFake
 from pgt.llm.meta import estimate_cost, responses_model
 from pgt.llm.routing import RoleRouter, mixed, resolve
@@ -118,6 +118,7 @@ def test_tools_use_final_result_tool():
     first, second = fake.bodies
     assert first["model"] == BASETEN_MODEL
     assert first["reasoning_effort"] == "low"
+    assert first["max_completion_tokens"] == MAX_OUTPUT  # a runaway answer stops early
     assert "response_format" not in first
     assert first["tool_choice"] == "auto"
     final = next(t for t in first["tools"] if t["function"]["name"] == "final_result")

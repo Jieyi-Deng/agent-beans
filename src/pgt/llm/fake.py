@@ -184,7 +184,8 @@ class MetaFake:
         output: list[dict] = []
         annotations: list[dict] = []
         if isinstance(obj, Searched):
-            for query in obj.queries:
+            limit = body.get("max_tool_calls") or len(obj.queries)  # Meta honours this cap
+            for query in obj.queries[:limit]:
                 output.append(
                     {
                         "type": "web_search_call",

@@ -37,7 +37,8 @@ Write one ad for one planned test:
     edge; "panel": a solid brand-colour panel below the photo; "poster": large type over a calm
     top third; "offer": band plus a badge with the kit's offer_badge. Use at least two different
     layouts, and "offer" only if the kit has an offer;
-  - words: the line set on this picture, 40 characters at most, different for each scene;
+  - words: the line set on this picture, 40 characters at most, different for each scene, and a
+    complete phrase: when a review asks for a shorter line, rewrite it, never cut it mid-phrase;
 - a storyboard for the 10-second 9:16 video: hook (over scene 1), benefit (scene 2), proof
   (scene 3), each 34 characters at most, and the end-card button, one of the kit's cta_buttons.
 Short, concrete, specific words beat clever ones. Follow the brand voice and constraints. List
@@ -113,6 +114,10 @@ def shot_prompt(scene: Scene, product: str, kit: CreativeKit | None) -> str:
         (f"The {product} in this photo is the one in @Image1: keep its exact shape, colours, "
          "materials and details, and show exactly one."),
         COMPOSITION.get(scene.layout, COMPOSITION["band"]),
+        # Copy space: a product that fills the frame leaves the words nowhere to go, above all
+        # in the 9:16 cut and the video, where the safe zone ends well above the bottom.
+        (f"Show the whole {product} at a medium size, about a third of the frame's height, "
+         "never filling the frame."),
     ]
     if kit:
         parts.append(f"Look: {kit.look}.")

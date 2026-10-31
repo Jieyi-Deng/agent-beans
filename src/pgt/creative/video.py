@@ -19,7 +19,9 @@ from PIL import Image, ImageDraw
 from pgt.creative.compose import Box, place_product
 from pgt.creative.design import (
     Style,
+    _map,
     block_height,
+    covered,
     crop_box,
     draw_block,
     fit_text,
@@ -72,35 +74,61 @@ class _Line:
 
 
 class _Shot:
+    """One moving shot. Its words sit at the bottom of the safe zone, or just under the wordmark
+    when the product would be behind them at the bottom; the camera aims the product at the
+    space the words leave free."""
+
     def __init__(self, photo: Image.Image, box: Box | None, move, text: str, style: Style) -> None:
         self.photo = photo.convert("RGB")
-        rect = product_rect(box, self.photo.size)
-        self.focus = ((rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2) if rect else None
+        self.rect = product_rect(box, self.photo.size)
+        self.focus = ((self.rect[0] + self.rect[2]) / 2,
+                      (self.rect[1] + self.rect[3]) / 2) if self.rect else None
         self.move = move
         left, top, right, bottom = safe_rect("9:16")
         face, lines = fit_text(text, style.display, right - left, range(104, 59, -4), 3)
+        height = block_height(face, lines)
+        low_box = (left, bottom - height, right, bottom)
+        high_top = top + 90  # under the wordmark
+        high_box = (left, high_top, right, high_top + height)
+        low_aim = (high_top + low_box[1] - 40) / 2 / SIZE[1]
+        high_aim = (high_box[3] + 40 + bottom) / 2 / SIZE[1]
+        words_box, side, self.aim = low_box, "bottom", low_aim
+        if self._under(high_box, high_aim) < self._under(low_box, low_aim) - 0.05:
+            words_box, side, self.aim = high_box, "top", high_aim
         step = round(face.size * 1.08)
-        y = bottom - block_height(face, lines)
+        y = words_box[1]
         self.lines = []
         for line in lines:
             self.lines.append(_Line(line, face, style.paper, (left, y)))
             y += step
-        words_box = (left, bottom - block_height(face, lines), right, bottom)
         mark_box = (left, top, right, top + 40)
         middle = self.camera(0.5).convert("RGBA")
         self.washes = []
-        for rect, side, start in ((words_box, "bottom", 0.3), (mark_box, "top", 0.0)):
-            layer, _ = wash_for(middle, rect, side, style.paper, style.ink, start)
+        washes = ((words_box, side, 0.3),) if side == "top" else \
+            ((words_box, "bottom", 0.3), (mark_box, "top", 0.0))
+        for rect, edge, start in washes:
+            covers = (rect[0], min(rect[1], mark_box[1]), rect[2], rect[3]) if edge == "top" \
+                else rect
+            layer, _ = wash_for(middle, covers, edge, style.paper, style.ink, start)
             if layer is not None:
                 middle = Image.alpha_composite(middle, layer)
                 self.washes.append(layer)
 
-    def camera(self, progress: float) -> Image.Image:
+    def _crop(self, progress: float, aim: float | None = None) -> tuple[float, float, float, float]:
         start, end, drift = self.move
         zoom = start + (end - start) * _ease(progress)
-        target = (0.5 + drift * (0.5 - progress), 0.45)
-        crop = crop_box(self.photo.size, SIZE, self.focus, target, zoom)
-        return self.photo.resize(SIZE, Image.Resampling.BILINEAR, box=crop)
+        target = (0.5 + drift * (0.5 - progress), self.aim if aim is None else aim)
+        return crop_box(self.photo.size, SIZE, self.focus, target, zoom)
+
+    def _under(self, words: tuple[int, int, int, int], aim: float) -> float:
+        """The most of the product the words would cover at any point in the shot."""
+        if self.rect is None:
+            return 0.0
+        return max(covered(_map(self.rect, self._crop(t, aim), (0, 0), SIZE), [words])
+                   for t in (0.0, 0.5, 1.0))
+
+    def camera(self, progress: float) -> Image.Image:
+        return self.photo.resize(SIZE, Image.Resampling.BILINEAR, box=self._crop(progress))
 
 
 class Cut:

@@ -86,6 +86,8 @@ def test_scenario_1_normal_weekly_review(tmp_path):
         if e.payload["role"] == "strategist"
     ]
     assert sum(e.payload["searches"] for e in research_calls) >= 1
+    research = [r for r in fake.requests if output_name(r) == "MarketResearch"]
+    assert research and all(r["max_tool_calls"] == 8 for r in research)  # a search budget
     answered = ws.events.list("question.answered", loop_id="weekly-w1")
     assert {e.payload["task_id"] for e in answered} == {"w1-t1", "w1-t2"}
     assert all(not e.payload["issues"] for e in answered)

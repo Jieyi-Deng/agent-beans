@@ -46,10 +46,14 @@ and layout code sets the brand fonts, the scene's words, the wordmark and the bu
 layout the Producer chose (band, panel, poster or offer). The video is cut in code from the same
 three shots with slow camera moves and animated words, then an end card with the product, the
 offer and the button. The layouts, fades and end card are the house design, not faults.
+Code sets every overlay word exactly as the copy spells it, so a spelling or punctuation slip you
+seem to see in an overlay is the type at small size, not a fault: check those words in the copy,
+and report overlay text only when it is hard to read or in the way.
 Look at the attached sheet and send the ad back only for something the Producer can fix:
 - the product in a scene is not the one in the reference photo (other shape, colour or parts),
   or a scene shows more than one of it;
-- visible AI faults: warped hands, faces or paws, melted objects, gibberish text or logos;
+- visible AI faults: warped hands, faces or paws, melted objects, gibberish text or logos in
+  the photo itself;
 - words that are hard to read, or that hide a face or the product;
 - anything off the creative kit (persona, season, look) or on its avoid list;
 - three shots that do not tell one story, or a storyboard that does not follow them.

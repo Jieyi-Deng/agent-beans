@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from time import perf_counter
 from typing import Any
 
@@ -82,6 +82,7 @@ class _Harness(AbstractCapability):
         self.citations: list[tuple[str, str]] = []
         self.blocked: set[str] = set()  # tool call IDs already refused and logged
         self.repeats: dict[str, int] = {}  # tool + args -> times called this run
+        self.refused = 0  # repeated calls answered with "hand in your final answer"
 
     def _record_hosted(self, response: ModelResponse) -> int:
         """Log hosted (server-side) tool calls such as web search, and collect citations."""
@@ -132,6 +133,14 @@ class _Harness(AbstractCapability):
         handler: WrapModelRequestHandler,
     ) -> ModelResponse:
         self.scope.meter.check(self.role, self.scope.loop_id)  # refuse once the total cap is used
+        if self.refused:
+            # The model was told to stop fetching and answer, and some open-weight models keep
+            # calling anyway. From here the request carries no role tools, only the way to
+            # hand in the deliverable.
+            params = request_context.model_request_parameters
+            request_context = replace(
+                request_context, model_request_parameters=replace(params, function_tools=[])
+            )
         response = None
         started = perf_counter()
         try:
@@ -189,6 +198,7 @@ class _Harness(AbstractCapability):
         same = f"{call.tool_name}:{json.dumps(call.args_as_dict(), sort_keys=True)}"
         self.repeats[same] = self.repeats.get(same, 0) + 1
         if self.repeats[same] > 2:
+            self.refused += 1
             return (
                 f"You already called {call.tool_name} with these arguments and have the result "
                 "above. Do not call it again. Hand in your final answer now."
@@ -229,10 +239,11 @@ async def run_role_full[T: BaseModel](
     tools: list = (),
     attachments: list[BinaryContent] = (),
     capabilities: list[AbstractCapability] = (),
+    settings: dict | None = None,
 ) -> RoleRun[T]:
     """Like run_role, plus hosted search counts and citations. `attachments` are images the
     model sees with the prompt (the Reviewer's vision check). `capabilities` add hosted tools;
-    callers check the allowlist before adding one."""
+    callers check the allowlist before adding one. `settings` add model settings."""
     model = resolve(model, role)
     harness = _Harness(role, scope, pack)
     agent = Agent(
@@ -244,7 +255,7 @@ async def run_role_full[T: BaseModel](
         capabilities=[harness, *capabilities],
         # Open-weight models sometimes miss the schema once; one extra try keeps a day from failing.
         retries={"tools": 1, "output": 2},
-        model_settings={"tool_choice": "auto", "openai_store": False},
+        model_settings={"tool_choice": "auto", "openai_store": False, **(settings or {})},
     )
     agent.instrument = False
     scope.ws.events.append(

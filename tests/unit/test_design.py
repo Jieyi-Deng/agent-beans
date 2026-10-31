@@ -9,7 +9,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from pgt.creative.compose import Box, make_demo_product_shot, png_bytes, product_box
-from pgt.creative.design import MIN_CONTRAST, Style, compose, safe_rect
+from pgt.creative.design import MIN_CONTRAST, Style, compose, covered, safe_rect
 from pgt.harness.creative_checks import check_design
 from pgt.llm.offline import offline_model
 from pgt.sandbox.scenario import fitness_app_kit, pet_store_kit
@@ -86,3 +86,50 @@ def test_offline_edit_puts_the_reference_product_in_the_scene():
     assert fake.violations == []
     assert fake.requests[-1]["prompt"].endswith("@Image1")
     assert "image" not in fake.requests[-1]
+
+
+def test_a_tall_product_the_panel_would_cut_off_gets_another_layout():
+    image = Image.new("RGB", (1024, 1536), (214, 200, 178))
+    tall = Box(380, 330, 660, 1030, 1024, 1536)  # a fountain nearly half the shot's height
+    ImageDraw.Draw(image).rectangle((tall.x1, tall.y1, tall.x2, tall.y2), fill=(30, 34, 40))
+    style = Style.from_kit(pet_store_kit(), "Shop Now")
+    design = compose(image, tall, "1:1", "panel", "Fresh water all day", style)
+    assert design.layout != "panel"
+    assert check_design("cat water fountain", [(3, "1:1", design)]) == []
+
+
+def test_the_9x16_panel_keeps_the_photo_under_the_reels_buttons():
+    photo = Image.new("RGB", (1024, 1536), (214, 200, 178))
+    box = Box(420, 360, 600, 700, 1024, 1536)  # a phone in hand
+    ImageDraw.Draw(photo).rectangle((box.x1, box.y1, box.x2, box.y2), fill=(30, 34, 40))
+    style = Style.from_kit(fitness_app_kit(), "Try It")
+    design = compose(photo, box, "9:16", "panel", "Ten minutes still counts", style)
+    assert design.layout == "panel"
+    lowest_row = design.image.crop((0, 1880, 1080, 1920)).getcolors(1080 * 40)
+    assert not (len(lowest_row) == 1 and lowest_row[0][1] == style.panel)  # photo, not a block
+    assert check_design("phone", [(1, "9:16", design)]) == []
+
+
+def test_the_poster_sets_its_words_low_when_the_product_sits_high():
+    image = Image.new("RGB", (1024, 1536), (214, 200, 178))
+    high = Box(380, 120, 640, 640, 1024, 1536)
+    ImageDraw.Draw(image).rectangle((high.x1, high.y1, high.x2, high.y2), fill=(30, 34, 40))
+    style = Style.from_kit(fitness_app_kit(), "Try It")
+    design = compose(image, high, "9:16", "poster", "Your streak, quietly kept going", style)
+    head = design.text_boxes[0]
+    assert head[1] > design.product_box[3]  # the headline starts below the product
+    assert check_design("phone", [(1, "9:16", design)]) == []
+
+
+@pytest.mark.parametrize("layout", ["band", "poster"])
+def test_the_9x16_wordmark_and_button_stay_off_a_product_in_the_middle(layout):
+    """The 9:16 safe zone ends two thirds down, right where the product usually is, so the
+    wordmark and button go up with the headline instead of sitting on it."""
+    image = Image.new("RGB", (1024, 1536), (214, 200, 178))
+    middle = Box(380, 700, 640, 1150, 1024, 1536)
+    ImageDraw.Draw(image).rectangle((middle.x1, middle.y1, middle.x2, middle.y2),
+                                    fill=(30, 34, 40))
+    style = Style.from_kit(pet_store_kit(), "Shop Now")
+    design = compose(image, middle, "9:16", layout, "Calmer walks start here", style)
+    assert covered(design.product_box, design.text_boxes) == 0
+    assert all(box[3] < design.product_box[1] for box in design.text_boxes)  # all above it

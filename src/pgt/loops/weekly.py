@@ -13,6 +13,7 @@ Each stage refuses to run without a valid approval of the stage before it.
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 from pathlib import Path
 
@@ -663,6 +664,7 @@ async def _render(
     scenes = [photos[(concept, p)] for p in prompts]
 
     style = Style.from_kit(kit, ad_copy.video.cta)
+    _keep_shots(folder, scenes)
     images, squares, laid_out = [], [], []
     for variant, (scene, (photo, box)) in enumerate(zip(ad_copy.scenes, scenes, strict=True),
                                                      start=1):
@@ -689,6 +691,17 @@ async def _render(
         )
     sheet = contact_sheet(squares, cut.keyframes(), reference)
     return images, video, png_bytes(sheet), laid_out
+
+
+def _keep_shots(folder: Path, scenes: list[tuple[Image.Image, Box | None]]) -> None:
+    """Keep each raw Muse shot and where SAM found the product, so the layouts can be redrawn
+    later without paying for the photographs again."""
+    folder.mkdir(parents=True, exist_ok=True)
+    boxes = {}
+    for n, (photo, box) in enumerate(scenes, start=1):
+        photo.convert("RGB").save(folder / f"shot{n}.jpg", quality=92)
+        boxes[f"shot{n}.jpg"] = [box.x1, box.y1, box.x2, box.y2, box.w, box.h] if box else None
+    (folder / "shots.json").write_text(json.dumps(boxes, indent=1))
 
 
 def _question_ids(scope: Scope, task_id: str) -> list[str]:

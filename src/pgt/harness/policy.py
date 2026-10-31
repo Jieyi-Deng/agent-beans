@@ -167,8 +167,8 @@ class CostMeter:
     and refuses it once the total is used up, so a live run cannot keep spending."""
 
     def __init__(
-        self, events: EventLog, per_call: float = 0.25,
-        per_role: float = 0.50, per_loop: float = 2.00, total: float | None = None,
+        self, events: EventLog, per_call: float = 0.50,
+        per_role: float = 1.00, per_loop: float = 3.00, total: float | None = None,
     ) -> None:
         self._events = events
         self.per_call, self.per_role, self.per_loop = per_call, per_role, per_loop
