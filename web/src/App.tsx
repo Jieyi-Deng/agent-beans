@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Wizard } from "./Access";
-import { api, date, REPLAY, useData, useLive, type Mode } from "./api";
+import { api, date, REPLAY, setDayOne, useData, useLive, type Mode } from "./api";
 import Assets from "./Assets";
 import { TEAM } from "./avatars";
 import Dashboard from "./Dashboard";
@@ -57,6 +57,7 @@ export default function App() {
   const route = useRoute();
   const { tick, busy } = useLive();
   const status = useData(api.status, [tick]);
+  setDayOne(status.data?.day_one);
   const list = useData(api.deliverables, [tick]);
   const room = useData(api.room, [tick]);
   const detail = useData(() => (route.key ? api.detail(route.key) : Promise.resolve(null)), [tick, route.key]);

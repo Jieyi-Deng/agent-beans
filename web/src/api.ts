@@ -115,7 +115,8 @@ export type Asset = {
 
 export type Mode = "offline" | "live" | "mixed";
 export type AppStatus = { busy: string | null; error: string | null; where: string;
-                          day: number | null; last_event_id: number; owner: string; mode: Mode };
+                          day: number | null; day_one?: string | null; last_event_id: number;
+                          owner: string; mode: Mode };
 
 /** Model calls for one role or one deliverable, at list price. */
 export type Tally = {
@@ -270,9 +271,31 @@ export function date(ts?: string | null): string {
   return `${d.toLocaleString("en-US", { month: "short" })} ${d.getDate()} ${d.getFullYear()}`;
 }
 
+let dayOne: Date | null = null;
+
+/** Sets the calendar date of Day 1 (from the status), so day numbers read as dates. */
+export function setDayOne(iso: string | null | undefined) {
+  dayOne = iso ? new Date(`${iso}T12:00:00`) : null;
+}
+
+/** Day 3 as its date, "Nov 3" (or "Tue Nov 3"); "Day 3" before an account is connected. */
+export function onDay(day: number, weekday = false): string {
+  if (!dayOne) return `Day ${day}`;
+  const d = new Date(dayOne);
+  d.setDate(d.getDate() + day - 1);
+  const md = `${d.toLocaleString("en-US", { month: "short" })} ${d.getDate()}`;
+  return weekday ? `${d.toLocaleString("en-US", { weekday: "short" })} ${md}` : md;
+}
+
+/** Days 3 to 6 as "Nov 3 to Nov 6"; one day as "Nov 3". */
+export function onDays(first: number, last: number): string {
+  if (first === last) return onDay(first);
+  return dayOne ? `${onDay(first)} to ${onDay(last)}` : `Days ${first} to ${last}`;
+}
+
 export function when(ts: string | null | undefined, day: number | null | undefined): string {
   const t = clock(ts);
-  return day ? `Day ${day} · ${t}` : t;
+  return day ? `${onDay(day)} · ${t}` : t;
 }
 
 export function money(n: number | null | undefined): string {

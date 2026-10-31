@@ -321,6 +321,7 @@ def create_app(team: Team, web_dist: str | Path | None = None, seed_days: int | 
         last = team.ws.events.list(since_id=0)[-1:] or []
         return {"busy": team.busy, "error": team.error, "where": views.where(team.ws),
                 "day": team.account.day if team.account else None,
+                "day_one": (start := views.ws_day_one(team.ws)) and start.isoformat(),
                 "last_event_id": last[0].id if last else 0, "owner": views.OWNER,
                 "mode": team.mode}
 

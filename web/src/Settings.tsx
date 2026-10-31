@@ -2,7 +2,7 @@
 // the team works from, what the models cost, and the controls that move the simulated week forward.
 import { Fragment, useState, type ReactNode } from "react";
 import { Connection, FactsForm, HouseRulesForm } from "./Access";
-import { api, money, useData, type AccessData, type SettingsData } from "./api";
+import { api, money, onDay, useData, type AccessData, type SettingsData } from "./api";
 import type { Route } from "./route";
 import { Av } from "./ui";
 
@@ -43,7 +43,7 @@ export default function Settings({ tick, busy, sidebar, route, access, onAccess 
       {sidebar}
       <main className="col scroll top" style={{ padding: "18px 28px", gap: 16, minWidth: 0 }}>
         <div>
-          <div className="eyebrow">{where}{data?.day ? ` · day ${data.day}` : ""}</div>
+          <div className="eyebrow">{where}{data?.day ? ` · ${onDay(data.day)}` : ""}</div>
           <div className="h1" style={{ marginTop: 4 }}>Settings</div>
         </div>
         {meta === "cancelled" && <div className="note">Facebook Login was cancelled. Nothing was connected.</div>}

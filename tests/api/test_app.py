@@ -3,11 +3,14 @@
 import json
 import shutil
 import time
+from datetime import date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
 from pgt.api.app import create_app, offline_team
+from pgt.api.views import day_one, on_day, period
+from pgt.harness.events import Event
 
 
 def _idle(client: TestClient, limit: float = 60) -> dict:
@@ -39,12 +42,28 @@ def test_seeded_week_waits_on_the_test_plan(client):
     waiting = _waiting(client)
     assert [d["title"] for d in waiting] == ["Test plan · Week 1 · v1"]
     assert waiting[0]["from"]["name"] == "Growth Lead"
-    # Empty daily change sets never show; ones with changes do.
+    # Empty daily change sets never show; ones with changes do. Days read as dates.
     titles = {d["title"] for d in items}
-    assert "Change set · Day 1 · v1" not in titles
-    assert "Change set · Day 3 · v1" in titles
-    day3 = next(d for d in items if d["title"] == "Change set · Day 3 · v1")
-    assert day3["status"] == "applied"
+    day_one = date.fromisoformat(client.get("/api/status").json()["day_one"])
+    assert f"Change set · {day_one:%b} {day_one.day} · v1" not in titles
+    day3 = day_one + timedelta(days=2)
+    assert f"Change set · {day3:%b} {day3.day} · v1" in titles
+    change = next(d for d in items if d["title"] == f"Change set · {day3:%b} {day3.day} · v1")
+    assert change["status"] == "applied"
+
+
+def test_day_one_is_the_day_after_the_sandbox_connects():
+    connected = Event(id=1, ts="2026-10-31T20:14:11+00:00", sim_day=0, loop_id=None,
+                      actor="system", type="account.connected", payload={}, refs=[])
+    start = day_one([connected])
+    assert start == datetime.fromisoformat(connected.ts).astimezone().date() + timedelta(days=1)
+    real = connected.model_copy(update={"id": 2, "payload": {"origin": "2026-10-24"}})
+    assert day_one([connected, real]) == date(2026, 10, 24)
+    assert on_day(date(2026, 11, 1), 3) == "Nov 3"
+    assert on_day(date(2026, 11, 1), 3, weekday=True) == "Tue Nov 3"
+    assert on_day(None, 3) == "Day 3"
+    assert period("day12/change_set", date(2026, 11, 1)) == "Nov 12"
+    assert period("week2/test_plan", date(2026, 11, 1)) == "Week 2"
 
 
 def test_room_mentions_owner_and_folds_handoffs(client):

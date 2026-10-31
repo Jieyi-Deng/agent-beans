@@ -5,7 +5,9 @@ Nothing here writes. The room is conversation; Deliverables lists every output w
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 
 from pgt.harness.artifacts import ArtifactRecord
 from pgt.harness.events import Event
@@ -49,20 +51,46 @@ def role(actor: str) -> dict:
     return {"actor": actor, "code": code, "name": name, "persona": persona}
 
 
-def period(key: str) -> str:
+def day_one(connected: list[Event]) -> date | None:
+    """The calendar date of Day 1, from the account.connected events: the real account's own
+    origin, or for the sandbox the day after it was connected (the team connects on Day 0)."""
+    for e in reversed(connected):
+        if e.payload.get("origin"):
+            return date.fromisoformat(e.payload["origin"])
+    if not connected:
+        return None
+    first = connected[0]
+    return (datetime.fromisoformat(first.ts).astimezone().date()
+            + timedelta(days=1 - (first.sim_day or 0)))
+
+
+def ws_day_one(ws: Workspace) -> date | None:
+    return day_one(ws.events.list("account.connected"))
+
+
+def on_day(start: date | None, day: int | str, weekday: bool = False) -> str:
+    """Day 3 as its date, "Nov 3" (or "Tue Nov 3"); "Day 3" when no account is connected."""
+    if start is None:
+        return f"Day {day}"
+    d = start + timedelta(days=int(day) - 1)
+    return f"{d:%a} {d:%b} {d.day}" if weekday else f"{d:%b} {d.day}"
+
+
+def period(key: str, start: date | None = None) -> str:
     head = key.split("/")[0]
-    for prefix, label in (("week", "Week"), ("day", "Day")):
-        if head.startswith(prefix) and head[len(prefix):].isdigit():
-            return f"{label} {head[len(prefix):]}"
+    if head.startswith("week") and head[4:].isdigit():
+        return f"Week {head[4:]}"
+    if head.startswith("day") and head[3:].isdigit():
+        return on_day(start, head[3:])
     return head
 
 
-def title(record: ArtifactRecord) -> str:
-    """Names follow `{Type} · {Period} [· {Subject}] · v{n}`."""
+def title(record: ArtifactRecord, start: date | None = None) -> str:
+    """Names follow `{Type} · {Period} [· {Subject}] · v{n}`, a day as its date."""
     parts = record.key.split("/")
     label = TYPES.get(record.kind, (record.kind, ""))[0]
     subject = [parts[-1]] if len(parts) > 2 else []
-    return " · ".join([label, period(record.key), *subject, f"v{record.version}"])
+    return " · ".join([label, period(record.key, start), *subject, f"v{record.version}"])
 
 
 def is_empty_change_set(record: ArtifactRecord) -> bool:
@@ -92,6 +120,7 @@ class Index:
     simulated: set[int] = field(default_factory=set)  # grant ids that a simulated user made
     models: dict[tuple[str | None, str], list[str]] = field(default_factory=dict)  # (loop, role)
     spend: dict[tuple[str | None, str], float] = field(default_factory=dict)  # (loop, role)
+    start: date | None = None  # the calendar date of Day 1
 
     @classmethod
     def build(cls, ws: Workspace) -> Index:
@@ -123,6 +152,7 @@ class Index:
                     names = idx.models.setdefault(at, [])
                     if p["model"] not in names:
                         names.append(p["model"])
+        idx.start = day_one([e for e in idx.events if e.type == "account.connected"])
         return idx
 
     def valid_grant(self, record: ArtifactRecord) -> Event | None:
@@ -204,7 +234,7 @@ def deliverable(ws: Workspace, idx: Index, record: ArtifactRecord, names: dict[s
         "artifact_id": record.artifact_id,
         "kind": record.kind,
         "tab": TYPES[record.kind][1],
-        "title": title(record),
+        "title": title(record, idx.start),
         "sub": subtitle(ws, record, names),
         "from": role(record.author),
         "status": cls,
@@ -295,19 +325,20 @@ def _fold_line(ws: Workspace, e: Event) -> tuple[str, str] | None:
         if record.kind in TYPES:
             if is_empty_change_set(record):
                 return record.author, "No changes needed today."
-            return record.author, f"Posted {title(record)}: {subtitle(ws, record, {})}"
+            return record.author, (f"Posted {title(record, ws_day_one(ws))}: "
+                                   f"{subtitle(ws, record, {})}")
         return None
     return None
 
 
-def _fold(lines: list[dict], loop_id: str | None) -> dict:
+def _fold(lines: list[dict], loop_id: str | None, start: date | None = None) -> dict:
     actors: list[str] = []
     for line in lines:
         if line["who"]["actor"] not in actors and line["who"]["code"]:
             actors.append(line["who"]["actor"])
     names = [role(a)["name"] for a in actors]
     if loop_id and loop_id.startswith("daily-d"):
-        tail = f"prepared the Day {loop_id[7:]} check"
+        tail = f"prepared the {on_day(start, loop_id[7:])} check"
     elif loop_id and loop_id.startswith("weekly-w"):
         tail = f"worked on the Week {loop_id[8:]} review"
     elif loop_id and loop_id.startswith("refresh-"):
@@ -409,7 +440,7 @@ def room(ws: Workspace, account=None, idx: Index | None = None) -> list[dict]:
     def flush():
         nonlocal fold
         if fold:
-            items.append(_fold(fold, fold[0]["loop"] or fold_loop))
+            items.append(_fold(fold, fold[0]["loop"] or fold_loop, idx.start))
             fold = []
 
     def add(item: dict):
@@ -432,9 +463,9 @@ def room(ws: Workspace, account=None, idx: Index | None = None) -> list[dict]:
             flush()
             fold_loop = e.loop_id
             if p.get("loop") == "weekly_review":
-                label = f"Day {e.sim_day} · weekly review · Week {p.get('week')}"
+                label = f"{on_day(idx.start, e.sim_day, True)} · weekly review · Week {p.get('week')}"
             else:
-                label = f"Day {e.sim_day} · daily check"
+                label = f"{on_day(idx.start, e.sim_day, True)} · daily check"
             items.append({"kind": "day", "id": e.id, "label": label, "sim_day": e.sim_day})
             continue
         if e.type == "artifact.published":
@@ -458,7 +489,7 @@ def room(ws: Workspace, account=None, idx: Index | None = None) -> list[dict]:
                 continue
             what = p.get("what", "deliverable")
             verb = "are" if what.endswith("s") else "is"
-            text = f"The {period(record.key)} {what} {verb} ready. "
+            text = f"The {period(record.key, idx.start)} {what} {verb} ready. "
             text += record.content.get("summary") or subtitle(ws, record, names)
             if record.kind == "ChangeSet":
                 text += " Nothing reaches the account until you approve."
@@ -469,7 +500,7 @@ def room(ws: Workspace, account=None, idx: Index | None = None) -> list[dict]:
             continue
         if e.type == "approval.granted":
             record = ws.artifacts.get(e.refs[0]) if e.refs else None
-            name = title(record) if record else p["key"]
+            name = title(record, idx.start) if record else p["key"]
             if e.id in idx.simulated:
                 n = len(p.get("approved", []))
                 text = (f"Simulated approval: approved {_plural(n, 'change')} in {name}, only "
@@ -550,7 +581,20 @@ def room(ws: Workspace, account=None, idx: Index | None = None) -> list[dict]:
             shown.update(mine)
             it["models"] = list(dict.fromkeys(m for at in mine for m in idx.models.get(at, [])))
             it["cost"] = round(sum(idx.spend[at] for at in mine), 6) if mine else None
+    if idx.start is not None:
+        _date_days(items, idx.start)
     return items
+
+
+def _date_days(items: list[dict], start: date) -> None:
+    """Turns "Day 12" in the team's messages into its date, as the dividers show it."""
+    def fix(text: str) -> str:
+        return re.sub(r"\bDay (\d+)\b", lambda m: on_day(start, m[1]), text)
+
+    for item in items:
+        for each in [item, *item.get("replies", []), *item.get("items", [])]:
+            if isinstance(each.get("text"), str):
+                each["text"] = fix(each["text"])
 
 
 def where(ws: Workspace) -> str:
@@ -561,7 +605,7 @@ def where(ws: Workspace) -> str:
     p = started[-1].payload
     if p.get("loop") == "weekly_review":
         return f"Weekly review · Week {p.get('week')}"
-    return f"Daily check · Day {p.get('day')}"
+    return f"Daily check · {on_day(ws_day_one(ws), p.get('day'), True)}"
 
 
 # ---------------------------------------------------------------- detail
