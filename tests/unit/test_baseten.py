@@ -13,6 +13,7 @@ from pgt.harness.workspace import Workspace
 from pgt.llm.baseten import BASETEN_MODEL, MAX_OUTPUT, baseten_client, chat_model
 from pgt.llm.fake import MetaFake
 from pgt.llm.meta import estimate_cost, responses_model
+from pgt.llm.repair import close_cut_json, tool_calls_in_text
 from pgt.llm.routing import RoleRouter, mixed, resolve
 from pgt.llm.runtime import Scope, run_role
 from pgt.roles.tools import evidence_tool
@@ -52,9 +53,11 @@ def completion(message: dict, finish: str, out_tokens: int = 40) -> dict:
 class BasetenFake:
     """Answers Chat Completions like Baseten: one tool call first if tools are offered, then JSON."""
 
-    def __init__(self, text_answer: str | None = None, lookups: list[dict] | None = None) -> None:
+    def __init__(self, text_answer: str | None = None, lookups: list[dict] | None = None,
+                 json_answer: str | None = None, finish: str = "stop") -> None:
         self.bodies: list[dict] = []
         self.text_answer = text_answer  # answer in plain text instead of final_result
+        self.json_answer, self.finish = json_answer, finish  # the answer when no tools are sent
         self.lookups = lookups or [{}]  # arguments for the first tool, one call each, in parallel
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -87,8 +90,9 @@ class BasetenFake:
                 ],
             }
             return httpx.Response(200, json=completion(msg, "tool_calls"))
-        msg = {"role": "assistant", "content": answer, "reasoning_content": "Nothing stands out."}
-        return httpx.Response(200, json=completion(msg, "stop"))
+        msg = {"role": "assistant", "content": self.json_answer or answer,
+               "reasoning_content": "Nothing stands out."}
+        return httpx.Response(200, json=completion(msg, self.finish))
 
     def client(self) -> AsyncOpenAI:
         transport = httpx.MockTransport(self.handler)
@@ -193,8 +197,9 @@ def test_parallel_evidence_lookups(tmp_path):
 def test_no_tools_use_json_schema():
     fake = BasetenFake()
     ws = Workspace()
+    # The Reviewer has no tools of its own and no memory tools.
     scope = Scope(ws, CostMeter(ws.events), "loop-1", 1)
-    out = asyncio.run(run_role("analyst", Findings, pack(), scope, chat_model(fake.client())))
+    out = asyncio.run(run_role("reviewer", Findings, pack(), scope, chat_model(fake.client())))
     assert out == Findings(findings=[])
     (body,) = fake.bodies
     assert body["response_format"]["type"] == "json_schema"
@@ -237,3 +242,53 @@ def test_key_comes_from_either_name(monkeypatch):
 def test_effort_is_checked():
     with pytest.raises(ValueError):
         chat_model(BasetenFake().client(), effort="max")
+
+
+# Seen live on Baseten: the deliverable written as tool-call markup instead of a tool call.
+LEAKED = ('<atem:function_calls>\n<atem:invoke name="final_result">\n'
+          '<atem:parameter name="findings">[]</atem:parameter>\n'
+          '<atem:parameter name="note_to_self"></atem:parameter>\n'
+          '</atem:invoke>\n</atem:function_calls>')
+
+
+def test_a_tool_call_written_as_text_becomes_the_call():
+    fake = BasetenFake(text_answer=LEAKED)
+    ws = Workspace()
+    scope = Scope(ws, CostMeter(ws.events), "loop-1", 1)
+
+    def lookup() -> str:
+        """Look up the evidence."""
+        return "ev_031: 96 trials"
+
+    out = asyncio.run(
+        run_role("analyst", Findings, pack(), scope, chat_model(fake.client()), [lookup])
+    )
+    assert out == Findings(findings=[])
+    assert len(fake.bodies) == 2  # no retry
+    last = ws.events.list("model.call")[-1].payload
+    assert last["ok"] and last["repaired"] == ["tool_call_in_text"]
+
+
+def test_json_stuck_in_trailing_whitespace_is_closed_without_a_retry():
+    """Seen live: a complete answer, then whitespace until the output limit, no closing brace."""
+    fake = BasetenFake(json_answer='{"findings":[] ' + " " * 3_000, finish="length")
+    ws = Workspace()
+    scope = Scope(ws, CostMeter(ws.events), "loop-1", 1)
+    out = asyncio.run(run_role("reviewer", Findings, pack(), scope, chat_model(fake.client())))
+    assert out == Findings(findings=[])
+    assert len(fake.bodies) == 1
+    assert ws.events.list("model.call")[-1].payload["repaired"] == ["cut_json"]
+
+
+def test_repairs_stay_narrow():
+    stuck = " " * 300
+    assert close_cut_json('{"a": [1]' + stuck) == '{"a": [1]}'
+    assert close_cut_json('{"a": "half a sent' + stuck) is None  # cut inside a value
+    assert close_cut_json('{"a": [1,' + stuck) is None
+    assert close_cut_json('{"a": [1]' + " " * 20) is None  # short whitespace: not stuck
+    # A call to a tool the request did not offer stays text, so the schema check rejects it.
+    text = LEAKED.replace("final_result", "apply_change")
+    assert tool_calls_in_text(text, {"final_result": {}}) == ([], text)
+    (call,), rest = tool_calls_in_text(LEAKED, {"final_result": {
+        "properties": {"findings": {"type": "array"}, "note_to_self": {"type": "string"}}}})
+    assert call.args == {"findings": [], "note_to_self": ""} and rest == ""

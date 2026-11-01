@@ -44,15 +44,19 @@ def escalate(scope: Scope, role: str, reason: str, refs: list[str] = ()) -> str:
     return reason
 
 
-def propose_fact(scope: Scope, role: str, key: str, value, reason: str) -> None:
-    """Roles may suggest a shared-fact change; only the user can apply it."""
-    scope.ws.events.append(
+def propose_fact(scope: Scope, role: str, key: str, value, reason: str,
+                 evidence_ids: list[str] = (), was=None) -> int:
+    """Roles may suggest a shared-fact change; only the user can apply it. Returns the event ID."""
+    event = scope.ws.events.append(
         "fact.proposed",
         role,
-        {"role": role, "key": key, "value": value, "reason": reason},
+        {"role": role, "key": key, "value": value, "reason": reason,
+         "evidence_ids": list(evidence_ids), "was": was},
+        refs=[i for i in evidence_ids if scope.ws.ledger.has(i)],
         sim_day=scope.sim_day,
         loop_id=scope.loop_id,
     )
+    return event.id
 
 
 Answerer = Callable[[str, list[str]], Awaitable[Answer]]

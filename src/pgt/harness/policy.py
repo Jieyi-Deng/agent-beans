@@ -9,12 +9,15 @@ from pgt.harness.events import EventLog
 from pgt.schemas import AccountState, Change, GateResult, RuleResult, SharedFacts
 
 ALLOWLIST: dict[str, set[str]] = {
-    "analyst": {"get_account_state", "get_insights", "get_evidence"},
-    "media_buyer": {"get_account_state", "get_insights", "get_evidence"},
+    "analyst": {"get_account_state", "get_insights", "get_evidence", "recall_week",
+                "recall_journal", "propose_fact"},
+    "media_buyer": {"get_account_state", "get_insights", "get_evidence", "recall_week",
+                    "recall_journal"},
     "reviewer": {"get_evidence"},
     "strategist": {"web_search"},
-    "growth_lead": {"get_account_state", "get_evidence"},
-    "producer": {"ask_analyst"},
+    "growth_lead": {"get_account_state", "get_evidence", "recall_week", "recall_journal",
+                    "propose_fact"},
+    "producer": {"ask_analyst", "recall_week", "recall_journal"},
 }
 
 

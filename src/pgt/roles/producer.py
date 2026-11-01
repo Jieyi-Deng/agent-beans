@@ -10,6 +10,7 @@ from pydantic_ai import Tool
 from pydantic_ai.models import Model
 
 from pgt.harness.context import assemble
+from pgt.harness.memory import period_of
 from pgt.llm.runtime import Scope, run_role
 from pgt.schemas import CreativeCopy, PlanTest, Scene, SharedFacts
 
@@ -72,6 +73,7 @@ async def run_producer(
         INSTRUCTIONS,
         facts,
         fact_version,
+        topic=f"{period_of(scope.loop_id, scope.sim_day)}/creative/{test.test_id}",
         task=f"Write the ad for test {test.test_id} ({test.name}) from its brief.",
         done_when="Lengths are within limits. Every number in the copy and the storyboard is "
         "backed by a claim whose evidence or source supports it, or stated in the facts or the "

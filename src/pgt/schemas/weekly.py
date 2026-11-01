@@ -69,7 +69,16 @@ class PlannedTest(_Out):
     metric: Literal["cost_per_result", "ctr"]
     stop_rule: str
     evidence_ids: list[str]  # evidence of the findings this test responds to
+    exploratory: bool  # true for the one test that tries something new, not a fix
     brief: CreativeBrief
+
+    @model_validator(mode="before")
+    @classmethod
+    def _older_test(cls, data):
+        """Plans saved before the exploratory flag count every test as a fix."""
+        if isinstance(data, dict) and "exploratory" not in data:
+            data = {**data, "exploratory": False}
+        return data
 
 
 class TestPlanDraft(_Out):

@@ -6,6 +6,8 @@ pgt weekly [--template app|ecommerce] [--yes] [--live] [--provider meta|mixed] [
 pgt serve [--template app|ecommerce] [--port 8000] [--db path] [--live] [--provider meta|mixed]
           [--cap 5] [--public] [--cold] [--ssl-certfile cert.pem --ssl-keyfile key.pem]
 pgt replay --source http://127.0.0.1:8000 [--out replay]
+pgt inspect-call <event id> --db path      print exactly what one model call saw
+pgt usage --db path [--loop daily-d3]      calls, cached share, cost and trims per role
 
 replay records a running team as the static, read-only site that GitHub Pages serves.
 
@@ -85,12 +87,38 @@ def main(argv: list[str] | None = None) -> None:
     rep = sub.add_parser("replay", help="Record a running team as a static, read-only site")
     rep.add_argument("--source", default="http://127.0.0.1:8000", help="The running pgt serve")
     rep.add_argument("--out", default="replay", help="Folder for data/ and media/")
+    ins = sub.add_parser("inspect-call", help="Print exactly what one model call saw")
+    ins.add_argument("event_id", type=int, help="The model.call event ID")
+    ins.add_argument("--db", required=True, help="SQLite file of the run")
+    use = sub.add_parser("usage", help="Calls, cached share, cost and trims per role")
+    use.add_argument("--db", required=True, help="SQLite file of the run")
+    use.add_argument("--loop", default=None, help="Only this loop, e.g. daily-d3 or weekly-w1")
     for p in (sim, week, serve):
         p.add_argument("--template", choices=["app", "ecommerce"], default="app",
                        help="Synthetic business in the sandbox")
     args = parser.parse_args(argv)
     if args.command == "serve":
         return _serve(args)
+    if args.command == "inspect-call":
+        from pgt.harness.requests import inspect_call, render
+
+        ws = Workspace(args.db)
+        try:
+            print(render(inspect_call(ws, args.event_id)))
+        except LookupError as e:
+            raise SystemExit(str(e)) from None
+        finally:
+            ws.close()
+        return None
+    if args.command == "usage":
+        from pgt.harness.report import harness_report, render
+
+        ws = Workspace(args.db)
+        try:
+            print(render(harness_report(ws, args.loop)))
+        finally:
+            ws.close()
+        return None
     if args.command == "replay":
         from pgt.replay import export, http_get
 
@@ -183,6 +211,7 @@ def _ask(question: str, yes: bool) -> bool:
 
 async def _weekly(args) -> None:
     from pgt.llm.media import MediaClient
+    from pgt.loops.close import close_week
     from pgt.loops.simulate import simulate
     from pgt.loops.weekly import apply_week, plan_week, produce_week
     from pgt.schemas import ChangeSet, TestPlan
@@ -236,6 +265,10 @@ async def _weekly(args) -> None:
         ws.approvals.grant(key, ws.artifacts.latest(key))
         summary, receipt = apply_week(ws, account)
         print(f"\nCreated {', '.join(receipt.created_ad_ids)} in the sandbox, all PAUSED.")
+        closed = await close_week(ws, model, plan.week)
+        if closed:
+            print(f"Closed week {plan.week}: memory versions {closed['versions']}, "
+                  f"{closed['rejected']} line(s) rejected.")
         _totals(ws, fake, f"weekly-w{plan.week}")
     finally:
         ws.close()

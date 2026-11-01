@@ -234,5 +234,22 @@ def test_used_up_cap_stops_a_loop_before_any_model_call():
     model, _ = offline_model("muse-spark-1.3")
     with pytest.raises(SpendCapExceeded):
         asyncio.run(simulate(1, model, ws, meter=CostMeter(ws.events, total=0.0)))
-    assert ws.events.list("model.call") == []
+    # The refused call is logged as a spend_cap failure; nothing reached the model.
+    calls = ws.events.list("model.call")
+    assert [c.payload["failure"] for c in calls] == ["spend_cap"]
+    assert calls[0].payload["input_tokens"] == 0 and ws.events.list("model.cost") == []
     assert ws.events.list("budget.exceeded")[0].payload["cap"] == "total"
+
+
+def test_text_before_a_web_search_is_not_judged_as_the_answer():
+    """Seen live: the Strategist wrote a line, searched, then answered. The answer was fine."""
+    from pydantic_ai.messages import ModelResponse, NativeToolCallPart, TextPart
+
+    from pgt.llm.runtime import schema_failure
+
+    answer = Findings(findings=[]).model_dump_json()
+    search = NativeToolCallPart("web_search", {"query": "dog harness"})
+    searched = ModelResponse(parts=[TextPart("Looking at competitors."), search, TextPart(answer)])
+    assert not schema_failure(searched, Findings, set())
+    assert schema_failure(ModelResponse(parts=[TextPart("Looking at competitors.")]),
+                          Findings, set())

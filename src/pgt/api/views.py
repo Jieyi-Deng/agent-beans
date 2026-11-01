@@ -764,8 +764,12 @@ def _tally(calls: list[Event]) -> dict:
     return {
         "models": [{"model": m, "provider": provider(m), "calls": n} for m, n in models.items()],
         "calls": len(calls),
-        "failed": sum(1 for e in calls if not e.payload.get("ok", True)),
+        "failed": sum(1 for e in calls if e.payload.get("failure")
+                      or not e.payload.get("ok", True)),
         "tokens": sum(e.payload["input_tokens"] + e.payload["output_tokens"] for e in calls),
+        "input_tokens": sum(e.payload["input_tokens"] for e in calls),
+        "cached_tokens": sum(e.payload.get("cached_tokens", 0) for e in calls),
+        "output_tokens": sum(e.payload["output_tokens"] for e in calls),
         "searches": sum(e.payload.get("searches", 0) for e in calls),
         "cost": round(sum(e.payload["cost"] for e in calls), 4),
         "seconds": round(sum(e.payload.get("wall_time_s", 0) for e in calls), 1),

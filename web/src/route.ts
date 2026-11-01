@@ -1,7 +1,9 @@
-// Hash routes: #/room, #/deliverables, #/deliverables/<key>, #/dashboard, #/assets, #/settings, with ?query.
+// Hash routes: #/room, #/deliverables, #/deliverables/<key>, #/dashboard, #/assets, #/memory, #/harness,
+// #/settings, with ?query.
 import { useEffect, useState } from "react";
 
-export type Route = { page: "room" | "deliverables" | "detail" | "dashboard" | "assets" | "settings"; key?: string;
+export type Route = { page: "room" | "deliverables" | "detail" | "dashboard" | "assets" | "memory" | "harness"
+                              | "settings"; key?: string;
                       q: URLSearchParams };
 
 function parse(): Route {
@@ -12,6 +14,8 @@ function parse(): Route {
   if (path === "deliverables") return { page: "deliverables", q };
   if (path === "dashboard") return { page: "dashboard", q };
   if (path === "assets") return { page: "assets", q };
+  if (path === "memory") return { page: "memory", q };
+  if (path === "harness") return { page: "harness", q };
   if (path === "settings") return { page: "settings", q };
   return { page: "room", q };
 }

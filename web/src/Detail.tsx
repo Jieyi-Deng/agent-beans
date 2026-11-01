@@ -279,11 +279,13 @@ export default function Detail({ d, error, sidebar, onChange, mode }: {
           <button className="btn ghost xs" onClick={() => go("deliverables")}>Close</button>
         </div>
         <div className="col" style={{ gap: 6 }}>
-          <div className="row" style={{ gap: 8 }}>
+          <div className="row" style={{ gap: "4px 8px", flexWrap: "wrap" }}>
             <Lbl status={d.status} label={d.status_label} />
             <span className="mono muted" style={{ fontSize: 11 }}>from {d.from.name} · {when(d.updated, d.sim_day)}</span>
             {d.made_with && <span className="mono faint" style={{ fontSize: 11 }}
               title={d.made_with.models.map((m) => `${m.model} on ${mode === "offline" ? "the offline stand-in" : m.provider}: ${m.calls}`).join("\n")}>{madeWith(d, mode)}</span>}
+            {d.made_with && <a className="mono" style={{ fontSize: 11, whiteSpace: "nowrap" }} href={`#/harness?topic=${d.key}`}
+               title="The stored request: every section, the prompt, tools and output schema">What the model saw</a>}
           </div>
           <div className="h1">{headline(d)}</div>
           <div className="muted" style={{ fontSize: 13 }}>{note(d)}</div>

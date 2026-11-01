@@ -15,6 +15,7 @@ from pgt.schemas.deliverables import (
     RuleResult,
     TestReadout,
 )
+from pgt.schemas.memory import LineVerdict, MemoryCheck, MemoryLineDraft, MemoryPass, NoteTriage
 from pgt.schemas.settings import PRESETS, HouseRules, SharedFacts
 from pgt.schemas.weekly import (
     CREATIVE_SIZES,
@@ -66,8 +67,13 @@ __all__ = [
     "GateResult",
     "HouseRules",
     "InsightRow",
+    "LineVerdict",
     "MarketInsight",
     "MarketResearch",
+    "MemoryCheck",
+    "MemoryLineDraft",
+    "MemoryPass",
+    "NoteTriage",
     "PlanTest",
     "PlannedTest",
     "ReviewVerdict",

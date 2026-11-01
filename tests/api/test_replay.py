@@ -28,9 +28,15 @@ def test_replay_writes_every_view_with_local_media(store, tmp_path):
     out = tmp_path / "site"
     manifest = export(store, out)
     assert data_file("/api/dashboard?days=7") == "dashboard-7.json"
+    assert data_file("/api/calls?topic=week2/brief") == "calls-week2/brief.json"
     for name in ("status", "room", "deliverables", "assets", "access", "settings", "drafts",
-                 "dashboard-7", "dashboard-28", "deliverables/week2/test_plan"):
+                 "dashboard-7", "dashboard-28", "deliverables/week2/test_plan", "memory",
+                 "harness", "memory/journal/media_buyer", "memory/week/1",
+                 "calls-week2/test_plan"):
         assert (out / "data" / f"{name}.json").is_file(), name
+    calls = json.loads((out / "data" / "calls-week2/test_plan.json").read_text())["items"]
+    seen = json.loads((out / "data" / "calls" / f"{calls[-1]['event_id']}.json").read_text())
+    assert seen["role"] == "growth_lead" and seen["sections"]
     text = "".join(p.read_text() for p in (out / "data").rglob("*.json"))
     assert "/api/media/" not in text
     assets = json.loads((out / "data" / "assets.json").read_text())

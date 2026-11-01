@@ -36,20 +36,33 @@ Get = Callable[[str], bytes]
 
 
 def data_file(path: str) -> str:
-    """'/api/dashboard?days=7' -> 'dashboard-7.json'. web/src/api.ts maps paths the same way."""
-    return path.removeprefix("/api/").replace("?days=", "-") + ".json"
+    """'/api/dashboard?days=7' -> 'dashboard-7.json', '/api/calls?topic=week1/brief' ->
+    'calls-week1/brief.json'. web/src/api.ts maps paths the same way."""
+    return re.sub(r"\?\w+=", "-", path.removeprefix("/api/"), count=1) + ".json"
 
 
 def _paths(get_json: Callable[[str], dict]) -> list[str]:
-    """Every GET the pages make, including one detail per deliverable the room or list shows."""
+    """Every GET the pages make: one detail per deliverable the room or list shows, the memory
+    view's journals and week records, and each stored request the Harness view can open."""
     fixed = ["/api/status", "/api/room", "/api/deliverables", "/api/settings", "/api/access",
-             "/api/drafts", "/api/assets", *(f"/api/dashboard?days={d}" for d in RANGES)]
+             "/api/drafts", "/api/assets", *(f"/api/dashboard?days={d}" for d in RANGES),
+             "/api/memory", "/api/harness"]
     keys = [d["key"] for d in get_json("/api/deliverables")["items"]]
     for item in get_json("/api/room")["items"]:
         card = item.get("card")
         if card and card.get("key") not in keys:
             keys.append(card["key"])
-    return fixed + [f"/api/deliverables/{k}" for k in keys]
+    memory = get_json("/api/memory")
+    roles = sorted(memory["lessons"])
+    calls = {c["event_id"] for c in get_json("/api/harness")["recent"] if c["inspectable"]}
+    for key in keys:
+        calls |= {c["event_id"] for c in get_json(f"/api/calls?topic={key}")["items"]
+                  if c["inspectable"]}
+    return (fixed + [f"/api/deliverables/{k}" for k in keys]
+            + [f"/api/calls?topic={k}" for k in keys]
+            + [f"/api/calls/{i}" for i in sorted(calls)]
+            + [f"/api/memory/journal/{r}" for r in roles]
+            + [f"/api/memory/week/{w['week']}" for w in memory["weeks"]])
 
 
 def _media(get: Get, url: str, out: Path) -> str:

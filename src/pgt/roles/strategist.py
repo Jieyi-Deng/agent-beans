@@ -39,6 +39,7 @@ async def run_research(
         INSTRUCTIONS,
         facts,
         fact_version,
+        topic=f"week{week}/research",
         task="Find three to five market insights for this week's focus: what similar apps say in "
         "their ads, which angles they lean on, and which hooks look fresh for our audience.",
         done_when="Each insight has a one-sentence claim, an angle, a short hook and at least one "

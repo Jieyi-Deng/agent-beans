@@ -23,8 +23,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from pgt.ads import meta_login
 from pgt.api import board, views
+from pgt.api.memory_routes import add_memory_routes
 from pgt.harness import access
 from pgt.harness.workspace import Workspace
+from pgt.loops.notes import route_message, route_send_back, triage_notes
 from pgt.schemas import ChangeSet
 from pgt.schemas.settings import PRESETS, HouseRules
 
@@ -78,6 +80,7 @@ async def seed(team: Team, days: int | None = None, seed: int = 7) -> None:
     Each earlier week is a full review the simulated owner approved: plan, new ads, then the
     paused ads created. So a store two weeks in already has a creative library and a test live.
     """
+    from pgt.loops.close import close_week
     from pgt.loops.simulate import simulate
     from pgt.loops.weekly import apply_week, plan_week, produce_week
     from pgt.sandbox import TEMPLATES
@@ -114,6 +117,7 @@ async def seed(team: Team, days: int | None = None, seed: int = 7) -> None:
         team.ws.events.append("ads.turned_on", "system",
                               {"ad_ids": receipt.created_ad_ids, "names": names},
                               sim_day=account.day)
+        await close_week(team.ws, team.model, summary.week, meter=team.meter)
 
 
 def _simulated_grant(ws: Workspace, key: str, day: int) -> None:
@@ -266,6 +270,7 @@ class Facts(BaseModel):
     weekly_budget: float | None = Field(None, gt=0, le=1_000_000)
     target_cost_per_result: float | None = Field(None, gt=0, le=100_000)
     test_budget_share: float | None = Field(None, gt=0, le=1)
+    long_term_goal: str | None = Field(None, max_length=300)
 
 
 class Connect(BaseModel):
@@ -397,7 +402,10 @@ def create_app(team: Team, web_dist: str | Path | None = None, seed_days: int | 
             week = int(period[4:])
 
             async def apply():
+                from pgt.loops.close import close_week
+
                 apply_week(team.ws, team.account, week=week)
+                await close_week(team.ws, team.model, week, meter=team.meter)
 
             team.run("Applying the change set", apply())
         elif key.endswith("/change_set"):
@@ -436,9 +444,10 @@ def create_app(team: Team, web_dist: str | Path | None = None, seed_days: int | 
               and int(period[3:]) == team.account.day):
             label = "Redoing today's change set"
             redo = revise_day(team.ws, team.account, team.model, note, meter=team.meter)
-        team.ws.events.append("approval.returned", "user",
-                              {"key": key, "note": note, "redo": redo is not None},
-                              refs=[record.artifact_id], sim_day=record.sim_day)
+        returned = team.ws.events.append("approval.returned", "user",
+                                         {"key": key, "note": note, "redo": redo is not None},
+                                         refs=[record.artifact_id], sim_day=record.sim_day)
+        route_send_back(team.ws, returned, key, record.author)
         if redo is not None:
             team.run(label, redo)
         return {"ok": True, "redo": redo is not None}
@@ -452,7 +461,13 @@ def create_app(team: Team, web_dist: str | Path | None = None, seed_days: int | 
         e = team.ws.events.append("message.posted", "user",
                                   {"text": text, "to": body.to, "thread": body.thread},
                                   sim_day=day)
-        return {"id": e.id}
+        to = route_message(team.ws, e, body.to, body.thread)
+        # A note for the Growth Lead is read now when the team is free; otherwise at the start
+        # of the next daily check or weekly review.
+        if to == "growth_lead" and not team.busy and not (team.real and team.fake is not None):
+            team.run("Reading your note",
+                     triage_notes(team.ws, team.model, team.meter, day))
+        return {"id": e.id, "to": to}
 
     @app.post("/api/run/day")
     async def run_day():
@@ -755,6 +770,8 @@ def create_app(team: Team, web_dist: str | Path | None = None, seed_days: int | 
         if not path.is_relative_to(root) or not path.is_file():
             raise HTTPException(404)
         return FileResponse(path)
+
+    add_memory_routes(app, team, _refresh)
 
     if web_dist and Path(web_dist).is_dir():
         dist = Path(web_dist)

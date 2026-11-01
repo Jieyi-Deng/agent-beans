@@ -8,6 +8,7 @@ from pgt.harness.artifacts import ArtifactStore
 from pgt.harness.events import EventLog
 from pgt.harness.facts import FactStore
 from pgt.harness.ledger import EvidenceLedger
+from pgt.harness.requests import RequestStore
 
 
 class Workspace:
@@ -20,6 +21,9 @@ class Workspace:
         self.facts = FactStore(self.events, self.artifacts)
         self.ledger = EvidenceLedger(self.events)
         self.approvals = Approvals(self.events, self.artifacts)
+        self.requests = RequestStore(self.events)
+        with self.events._transaction():  # memory reads filter the log by event type
+            self._conn.execute("CREATE INDEX IF NOT EXISTS events_type ON events (type, id)")
 
     def close(self) -> None:
         self._conn.close()

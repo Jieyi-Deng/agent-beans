@@ -41,7 +41,7 @@ from pgt.harness.creative_checks import (
     check_video,
     extract_numbers,
 )
-from pgt.harness.policy import CostMeter
+from pgt.harness.policy import CostMeter, SpendCapExceeded
 from pgt.harness.protocol import ask_tool, escalate, handoff
 from pgt.harness.workspace import Workspace
 from pgt.llm.media import MediaClient
@@ -169,7 +169,15 @@ async def plan_week(
     week: int | None = None,
     meter: CostMeter | None = None,
 ) -> WeeklyReviewSummary:
+    from pgt.loops.close import close_open_weeks
+    from pgt.loops.notes import triage_notes
+
     week = week or current_week(account)
+    meter = meter or CostMeter(ws.events)
+    # Weeks that ended without a closed record (the owner never approved their change set)
+    # are closed now, so this review starts from up-to-date memory.
+    await close_open_weeks(ws, model, week, meter)
+    await triage_notes(ws, model, meter, account.day)
     scope = _scope(ws, account, week, meter)
     log = ws.events.append
     facts, fv = ws.facts.current(), ws.facts.version
@@ -539,9 +547,15 @@ async def produce_week(
             issues += check_captions(concept, captions)
             by = "code"
             if not issues:
-                review = await review_creative(
-                    scope, model, facts, fv, test, ad_copy, sheet, kit
-                )
+                try:
+                    review = await review_creative(
+                        scope, model, facts, fv, test, ad_copy, sheet, kit
+                    )
+                except SpendCapExceeded:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - a failed review is not a verdict
+                    _review_failed(scope, week, test.test_id, creative_id, creative_rec, exc)
+                    return None
                 issues = [] if review.verdict == "pass" else review.issues or ["Redo requested."]
                 by = "reviewer"
             ws.artifacts.publish(
@@ -622,6 +636,25 @@ async def produce_week(
         creative_ids=creative_ids,
         change_set_id=change_set.change_set_id,
     )
+
+
+def _review_failed(scope: Scope, week: int, test_id: str, creative_id: str, creative_rec,
+                   exc: Exception) -> None:
+    """The Reviewer's call failed (timeout, provider or schema): the owner hears that the review
+    could not run. The creative is not sent back and the Producer's work is not judged."""
+    failures = [e.payload["failure"] for e in scope.ws.events.list("model.call",
+                                                                  loop_id=scope.loop_id)
+                if e.payload.get("role") == "reviewer" and e.payload.get("failure")]
+    failure = failures[-1] if failures else "provider"
+    scope.ws.events.append(
+        "review.failed", "reviewer",
+        {"topic": f"week{week}/creative/{test_id}", "test_id": test_id,
+         "creative_id": creative_id, "failure": failure,
+         "error": f"{type(exc).__name__}: {exc}"[:300]},
+        refs=[creative_rec.artifact_id], sim_day=scope.sim_day, loop_id=scope.loop_id)
+    escalate(scope, "reviewer",
+             f"Review could not run for {test_id} ({failure}). The creative was not sent back; "
+             "run the week again or review it yourself.", [creative_rec.artifact_id])
 
 
 def _reusable(ws: Workspace, week: int, test_id: str) -> CreativeSet | None:

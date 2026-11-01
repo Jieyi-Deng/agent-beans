@@ -21,9 +21,13 @@ CHANGE_SET_FACT_KEYS = ["house_rules", "target_cost_per_result", "weekly_budget"
 async def run_daily_check(
     ws: Workspace, account: SandboxAccount, model: Model, meter: CostMeter | None = None
 ) -> DailyBrief:
+    from pgt.loops.notes import triage_notes
+
     day = account.day
     loop_id = f"daily-d{day}"
-    scope = Scope(ws, meter or CostMeter(ws.events), loop_id, day)
+    meter = meter or CostMeter(ws.events)
+    await triage_notes(ws, model, meter, day)  # owner notes reach their role before the work
+    scope = Scope(ws, meter, loop_id, day)
     facts, fact_version = ws.facts.current(), ws.facts.version
     log = ws.events.append
     log(

@@ -113,6 +113,72 @@ export type Asset = {
   steps: Step[]; facts: [string, string][]; used_in: Link | null; deliverable: string | null;
 };
 
+/** Memory: the account memory, each role's lessons, frozen week records and owner notes. */
+export type MemLine = { id: string; text: string; sources: string[]; author: string; locked: boolean;
+                        status: "active" | "watch" | "inactive" | "struck"; created_week: number | null;
+                        last_confirmed_week: number | null; flag: string | null };
+export type MemVersion = { version: number; week: number | null; reason: string; author: string; ts: string; lines: number };
+export type MemStore = { version: number; lines: MemLine[]; history: MemVersion[] };
+export type Note = { id: string; event_id: number; text: string; kind: "message" | "send_back"; to: string | null;
+                     day: number | null; routed: { to: string; by: string; event_id: number }[]; seen_by: string[];
+                     done: { role: string; how: string } | null };
+export type MemProposal = { id: number; ts: string; store: string; role: string | null; line_id: string;
+                            text: string; was: string; by: string; sources: string[] };
+export type FactProposal = { id: number; ts: string; sim_day: number | null; key: string; value: unknown;
+                             was: unknown; reason: string; evidence_ids?: string[]; by?: string; role?: string;
+                             resolved: { accepted: boolean } | null };
+export type Rejected = { id: number; ts: string; store: string; role: string | null; line_id: string; text: string;
+                         sources: string[]; problems: string[]; by: "code" | "reviewer"; week: number };
+export type MemoryData = {
+  account: MemStore; lessons: Record<string, MemStore>;
+  weeks: { week: number; stub: string; event_id: number }[]; closed: number[];
+  notes: Note[]; proposals: MemProposal[]; fact_proposals: FactProposal[];
+  charter: Record<string, unknown> | null; charter_version: number;
+  rejected: Rejected[]; reverted: { id: number; ts: string; role: string; from_version: number;
+    to_version: number; reason: string }[];
+  collapse: { id: number; role: string; reason: string }[];
+  failed: { id: number; pass: string; week: number; error: string }[];
+};
+export type Outcome = { id: string; outcome: string; good: boolean | null; detail: string; simulated?: boolean };
+export type JournalEntry = { id: string; event_id: number; loop_id: string; role: string; topic: string;
+                             kind: string; decided: string; note_to_self: string; week: number | null;
+                             day: number | null; outcomes: Outcome[] };
+export type WeekRecord = { week: number; days: number[]; stub: string;
+  readouts: { day: number; test_id: string; name: string; angle: string; recommendation: string;
+              rationale: string; metric: string; exploratory?: boolean }[];
+  changes: { change_set_id: string; day: number | null; created_ad_ids: string[];
+             applied: { kind: string; target_id: string; new_daily_budget: number | null }[] }[];
+  owner: { approved: number; sent_back: number; simulated: number; notes: string[] } };
+export type MemoryEdit = { store: "account" | "lessons"; role?: string | null;
+                           action: "add" | "edit" | "strike" | "restore"; line_id?: string | null; text?: string };
+
+/** Harness: what each role's calls cost and saw, against its context budget. */
+export type RoleRow = { role: string; calls: number; input_tokens: number; cached_tokens: number; cached_share: number;
+  output_tokens: number; searches: number; cost: number; failures: Record<string, number>; failed: number;
+  contexts: number; trimmed: number; trimmed_share: number; trimmed_sections: Record<string, number>;
+  flag_larger_budget: boolean; largest_inputs: number; inputs_budget: number; largest_context: number;
+  budget_total: number };
+export type CallRow = { event_id: number; ts: string; loop_id: string | null; sim_day: number | null; role: string;
+  model: string; topic: string | null; attempt: number | null; failure: string | null; input_tokens: number;
+  cached_tokens: number; output_tokens: number; cost: number; wall_time_s: number; context_hash: string | null;
+  inspectable: boolean };
+export type HarnessData = { roles: RoleRow[]; totals: { calls: number; input_tokens: number; cached_tokens: number;
+  cached_share: number; output_tokens: number; cost: number; failed: number; trimmed: number };
+  budgets: Record<string, number | string>[]; stored: { contexts: number; requests: number };
+  trim_flag_share: number; recent: CallRow[] };
+export type SectionInfo = { name: string; place: string; must_keep: boolean; tokens: number; budget: number | null;
+                            dropped: number; left_out: string[]; before_tokens: number | null };
+export type Turn = { kind: string; parts: Record<string, unknown>[] };
+export type SeenCall = { event_id: number; ts: string; loop_id: string | null; sim_day: number | null;
+  call: Record<string, unknown> & { input_tokens: number; cached_tokens?: number; output_tokens: number; cost: number;
+    failure?: string | null; attempt?: number; deadline_s?: number };
+  role: string; topic: string | null; model: string; provider: string | null; settings: Record<string, unknown>;
+  instructions: string; prompt: string; sections: SectionInfo[];
+  attachments: { media_type: string; bytes: number; sha256: string }[];
+  tools: { name: string; description: string }[]; native_tools: unknown[];
+  output: { mode: string; object?: { name: string } | null } | null; turns: Turn[];
+  request_hash: string | null; context_hash: string | null };
+
 export type Mode = "offline" | "live" | "mixed";
 export type AppStatus = { busy: string | null; error: string | null; where: string;
                           day: number | null; day_one?: string | null; last_event_id: number;
@@ -167,7 +233,8 @@ export const REPLAY = import.meta.env.MODE === "replay";
 export const READ_ONLY = "This is a recorded replay, so nothing changes here. Run PGT locally to approve, send back or talk to the team.";
 
 function replayFile(path: string): string {
-  return "data/" + path.replace(/^\/api\//, "").replace("?days=", "-") + ".json";
+  // "/api/dashboard?days=7" -> "data/dashboard-7.json"; src/pgt/replay.py names files the same way.
+  return "data/" + path.replace(/^\/api\//, "").replace(/\?\w+=/, "-") + ".json";
 }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -214,6 +281,19 @@ export const api = {
   dashboard: (days: number) => call<DashboardData>(`/api/dashboard?days=${days}`),
   drafts: () => call<Drafts>("/api/drafts"),
   assets: () => call<{ items: Asset[] } & Which>("/api/assets"),
+  memory: () => call<MemoryData>("/api/memory"),
+  journal: (role: string) => call<{ role: string; entries: JournalEntry[] }>(`/api/memory/journal/${role}`),
+  week: (week: number) => call<WeekRecord>(`/api/memory/week/${week}`),
+  editMemory: (body: MemoryEdit) =>
+    call<{ ok: boolean }>("/api/memory/edit", { method: "POST", body: JSON.stringify(body) }),
+  decideMemory: (id: number, accept: boolean) =>
+    call(`/api/memory/proposals/${id}`, { method: "POST", body: JSON.stringify({ accept }) }),
+  decideFact: (id: number, accept: boolean) =>
+    call<{ ok: boolean; fact_version: number; refresh: boolean }>(`/api/facts/proposals/${id}`,
+      { method: "POST", body: JSON.stringify({ accept }) }),
+  harness: () => call<HarnessData>("/api/harness"),
+  calls: (topic: string) => call<{ items: CallRow[] }>(`/api/calls?topic=${topic}`),
+  seen: (id: number) => call<SeenCall>(`/api/calls/${id}`),
   upload: async (file: File) => {
     if (REPLAY) throw new Error(READ_ONLY);
     const res = await fetch(`/api/assets/upload?name=${encodeURIComponent(file.name)}`,
