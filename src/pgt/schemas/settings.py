@@ -64,3 +64,4 @@ class SharedFacts(BaseModel):
     brand_voice: str
     house_rules: HouseRules = HouseRules()
     constraints: list[str] = []
+    long_term_goal: str = ""  # e.g. "reach $12 cost per purchase by the end of the quarter"

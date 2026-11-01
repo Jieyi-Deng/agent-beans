@@ -6,6 +6,8 @@ import { TEAM } from "./avatars";
 import Dashboard from "./Dashboard";
 import Deliverables from "./Deliverables";
 import Detail from "./Detail";
+import Harness from "./Harness";
+import Memory from "./Memory";
 import Room from "./Room";
 import { go, useRoute, type Route } from "./route";
 import Settings from "./Settings";
@@ -35,6 +37,8 @@ function Sidebar({ route, waiting, mode, account }: { route: Route; waiting: num
           <span className="nav-dot" title={`${waiting} ${waiting === 1 ? "item" : "items"} waiting on ${OWNER}`} />)}
         {item("dashboard", "Dashboard")}
         {item("assets", "Creative Assets")}
+        {item("memory", "Memory")}
+        {item("harness", "Harness")}
         {item("settings", "Settings")}
       </nav>
       <div className="grow" />
@@ -86,6 +90,8 @@ export default function App() {
     page = <Detail d={d} error={detail.error} sidebar={sidebar} onChange={() => undefined} mode={mode} />;
   } else if (route.page === "dashboard") page = <Dashboard tick={tick} route={route} sidebar={sidebar} items={items} />;
   else if (route.page === "assets") page = <Assets tick={tick} route={route} sidebar={sidebar} mode={mode} />;
+  else if (route.page === "memory") page = <Memory tick={tick} busy={busy} route={route} sidebar={sidebar} />;
+  else if (route.page === "harness") page = <Harness tick={tick} route={route} sidebar={sidebar} mode={mode} />;
   else if (route.page === "settings") page = <Settings tick={tick} busy={busy} sidebar={sidebar} route={route}
                                                        access={a ?? null} onAccess={refresh} />;
   else page = <Room items={room.data?.items ?? []} where={status.data?.where ?? ""} busy={busy}

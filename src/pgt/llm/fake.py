@@ -123,6 +123,29 @@ def _input_tokens(content: bytes) -> int:
     return len(_DATA_URL.sub(b'""', content)) // 4 + images * IMAGE_TOKENS
 
 
+CACHE_MIN_TOKENS, CACHE_BLOCK = 1_024, 128  # like the providers: whole blocks past a minimum
+
+
+def _prefix_text(body: dict) -> str:
+    """What a provider's prompt cache keys on: tools, output format, instructions, then input,
+    with images reduced to a digest."""
+    head = json.dumps({"tools": body.get("tools", []), "text": body.get("text", {}),
+                       "instructions": body.get("instructions", "")}, sort_keys=True)
+    rest = json.dumps(body.get("input", ""), sort_keys=True)
+    return head + "\x00" + _DATA_URL.sub(b'"image"', rest.encode()).decode()
+
+
+def _common(a: str, b: str) -> int:
+    lo, hi = 0, min(len(a), len(b))
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if a[:mid] == b[:mid]:
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
+
+
 def output_name(body: dict) -> str:
     return body.get("text", {}).get("format", {}).get("name", "")
 
@@ -155,6 +178,19 @@ class MetaFake:
         self.violations: list[str] = []
         self.calls: list[dict] = []  # model, input/output tokens and searches per served call
         self._count = 0
+        self._seen: dict[str, list[str]] = {}  # recent request prefixes per model
+
+    def _cached_tokens(self, body: dict, input_tokens: int) -> int:
+        """Simulate the providers' prefix cache: the longest prefix shared with a recent request
+        to the same model, in whole blocks once it passes the minimum."""
+        text = _prefix_text(body)
+        seen = self._seen.setdefault(body.get("model", ""), [])
+        shared = max((_common(text, prev) for prev in seen), default=0)
+        seen.append(text)
+        del seen[:-24]
+        cached = shared // 4
+        cached = cached // CACHE_BLOCK * CACHE_BLOCK if cached >= CACHE_MIN_TOKENS else 0
+        return min(cached, input_tokens)
 
     def client(self) -> AsyncOpenAI:
         return AsyncOpenAI(
@@ -233,11 +269,13 @@ class MetaFake:
         # Rough token counts so offline runs still show plausible costs.
         input_tokens = _input_tokens(request.content)
         output_tokens = len(text) // 4
+        cached_tokens = self._cached_tokens(body, input_tokens)
         searches = sum(1 for o in output if o["type"] == "web_search_call")
         self.calls.append(
             {
                 "model": body.get("model"),
                 "input_tokens": input_tokens,
+                "cached_tokens": cached_tokens,
                 "output_tokens": output_tokens,
                 "searches": searches,
             }
@@ -261,7 +299,7 @@ class MetaFake:
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
                     "total_tokens": input_tokens + output_tokens,
-                    "input_tokens_details": {"cached_tokens": 0},
+                    "input_tokens_details": {"cached_tokens": cached_tokens},
                     "output_tokens_details": {"reasoning_tokens": 0},
                 },
             },

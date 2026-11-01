@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from pydantic_ai.models import Model
 
 from pgt.harness.context import assemble
+from pgt.harness.memory import period_of
 from pgt.llm.runtime import Scope, run_role
 from pgt.roles.metrics import READOUT_RULE, Signal
 from pgt.roles.tools import evidence_tool
@@ -39,6 +42,7 @@ async def run_analyst(
         INSTRUCTIONS,
         facts,
         fact_version,
+        topic=f"day{day}/findings",
         task=f"Write the findings for day {day}. Cover every act and watch signal; "
         "add info findings only when they change what the team should do today.",
         done_when="Each finding has subject_id, a one-sentence claim, the metric name, a value "
@@ -67,6 +71,7 @@ async def run_readout(
         INSTRUCTIONS,
         facts,
         fact_version,
+        topic=f"day{scope.sim_day}/readout/{test_id}",
         task=f"Read out test {test_id}. {READOUT_RULE}",
         done_when="The recommendation follows the rule, the rationale quotes cost per result "
         "against target, and each finding cites the readout evidence.",
@@ -98,6 +103,7 @@ async def run_weekly_analyst(
         INSTRUCTIONS,
         facts,
         fact_version,
+        topic=f"week{week}/findings",
         task=f"Write the findings for the week {week} review: this week's winners and losers, "
         "and the daily findings carried into the week (signals of kind carried).",
         done_when="Each signal becomes one finding with subject_id, a one-sentence claim, the "
@@ -127,6 +133,10 @@ async def run_answer(
         INSTRUCTIONS,
         facts,
         fact_version,
+        # One topic per question, so a retry of the same question reads as a redo and a new
+        # question does not.
+        topic=f"{period_of(scope.loop_id, scope.sim_day)}/answer/"
+        f"{hashlib.sha1(question.encode()).hexdigest()[:8]}",
         task="Answer the question from a teammate in one or two plain sentences, using only the "
         "evidence given.",
         done_when="The answer cites the evidence IDs it uses, and every number in it is copied "

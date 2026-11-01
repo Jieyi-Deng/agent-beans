@@ -20,6 +20,7 @@ from pathlib import Path
 
 os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
 
+from bench import memory
 from bench.arms import agents_sdk, langgraph_team, pgt, single_agent
 from bench.grader import Grade, grade
 from bench.responder import bench_responder
@@ -149,6 +150,9 @@ def main() -> None:
     parser.add_argument("--seeds", nargs="+", type=int, default=SEEDS)
     parser.add_argument("--out", type=Path, default=ROOT / "bench" / "out")
     parser.add_argument("--doc", type=Path, default=ROOT / "docs" / "BENCH_RESULTS.md")
+    parser.add_argument(
+        "--skip-memory", action="store_true", help="leave out the memory safeguard scenarios"
+    )
     args = parser.parse_args()
 
     scenarios = [s for s in SCENARIOS if s.key in args.scenarios]
@@ -158,6 +162,16 @@ def main() -> None:
         json.dumps([g.as_dict() for g in grades], indent=2) + "\n"
     )
     report = markdown(grades, args.arms, scenarios)
+    if not args.skip_memory:
+        kept = asyncio.run(memory.run_all(memory.SCENARIOS, args.seeds))
+        (args.out / "memory.json").write_text(
+            json.dumps([g.as_dict() for g in kept], indent=2) + "\n"
+        )
+        report += "\n".join(memory.markdown(kept, memory.SCENARIOS)) + "\n"
+        if failed := [g for g in kept if not g.passed]:
+            report += "\nMemory failures: " + "; ".join(
+                f"{g.scenario} seed {g.seed}: {g.why}" for g in failed
+            ) + "\n"
     args.doc.write_text(report)
     print(report)
 

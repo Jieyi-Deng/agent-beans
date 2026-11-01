@@ -42,6 +42,7 @@ async def run_media_buyer(
         INSTRUCTIONS,
         facts,
         fact_version,
+        topic=f"day{state.day}/change_set",
         task=f"Propose today's changes for day {state.day}, based on the findings.",
         done_when="Each change has a kind, target_id, new_daily_budget (null unless set_budget), "
         "a one-sentence reason, and the evidence_ids from the findings it acts on."

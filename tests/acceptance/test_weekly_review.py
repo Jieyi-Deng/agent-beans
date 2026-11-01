@@ -215,3 +215,26 @@ def test_no_product_found_escalates(tmp_path):
     assert summary.stage == "escalated"
     assert summary.escalations == ["SAM 3.1 found no phone in the product photo."]
     assert ws.artifacts.latest("week1/change_set") is None
+
+
+def test_a_reviewer_call_that_fails_reaches_the_owner_as_a_failure_not_a_send_back(tmp_path):
+    def responder(body):
+        if output_name(body) == "CreativeReview":
+            return {"verdict": 7}  # never a valid review: the call fails after its retries
+        return offline_responder(body)
+
+    ws, account, model, fake = week_one(responder)
+    summary = plan_and_produce(ws, account, model, fake, tmp_path)
+    assert summary.stage == "escalated"
+    failed = ws.events.list("review.failed")
+    assert failed and all(e.payload["failure"] == "schema" for e in failed)
+    reasons = [e.payload["reason"] for e in ws.events.list("escalation.raised")]
+    assert any(r.startswith("Review could not run for w1-t") for r in reasons)
+    # Nothing was sent back to the Producer, and its work is not judged by the failure.
+    assert not [e for e in ws.events.list("review.redo") if e.payload["subject"].endswith("-c1")]
+    from pgt.harness import memory
+
+    memory.record_outcomes(ws)
+    outcomes = [o.payload for o in ws.events.list("journal.outcome")
+                if o.payload["outcome"] == "review_failed"]
+    assert outcomes and all(o["good"] is None and o["role"] == "producer" for o in outcomes)

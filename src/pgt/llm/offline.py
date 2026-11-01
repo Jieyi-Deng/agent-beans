@@ -34,8 +34,13 @@ from pgt.schemas import (
     CreativeReview,
     Finding,
     Findings,
+    LineVerdict,
     MarketInsight,
     MarketResearch,
+    MemoryCheck,
+    MemoryLineDraft,
+    MemoryPass,
+    NoteTriage,
     PlannedTest,
     Scene,
     Source,
@@ -56,6 +61,9 @@ def offline_responder(body: dict):
         "WeeklyBrief": _weekly_brief,
         "Answer": _answer,
         "CreativeReview": _creative_review,
+        "MemoryPass": _memory_pass,
+        "MemoryCheck": _memory_check,
+        "NoteTriage": _note_triage,
     }
     if name in weekly:
         return weekly[name](inputs)
@@ -408,6 +416,7 @@ def _plan(inputs: dict, flavor: dict = APP) -> TestPlanDraft:
                 metric="cost_per_result",
                 stop_rule="Stop after 7 days, or at 3x target spend with no result.",
                 evidence_ids=f["evidence_ids"],
+                exploratory=False,
                 brief=CreativeBrief(
                     product=flavor["product"],
                     angle=angle,
@@ -430,6 +439,7 @@ def _plan(inputs: dict, flavor: dict = APP) -> TestPlanDraft:
             metric="cost_per_result",
             stop_rule="Stop after 7 days, or at 3x target spend with no result.",
             evidence_ids=findings[0]["evidence_ids"],
+            exploratory=True,
             brief=CreativeBrief(
                 product=flavor["product"],
                 angle=flavor["angles"][1],
@@ -439,6 +449,8 @@ def _plan(inputs: dict, flavor: dict = APP) -> TestPlanDraft:
                 replaces_ad_id=None,
             ),
         ))
+    if tests and not any(t.exploratory for t in tests):
+        tests[-1] = tests[-1].model_copy(update={"exploratory": True})
     summary = _revised(inputs, "Two creative tests drawn from this week's findings.")
     return TestPlanDraft(summary=summary, tests=tests)
 
@@ -507,6 +519,124 @@ def _creative_review(inputs: dict) -> CreativeReview:
     text = " ".join([ad["headline"], ad["primary_text"], ad["description"]]).lower()
     issues = [fix for phrase, fix in RISKY.items() if phrase in text]
     return CreativeReview(verdict="redo" if issues else "pass", issues=issues)
+
+
+# --- Memory calls -------------------------------------------------------------------------------
+
+
+def _memory_pass(inputs: dict) -> MemoryPass:
+    if "week_record" in inputs:
+        return _account_pass(inputs)
+    return _lesson_pass(inputs)
+
+
+def _account_pass(inputs: dict) -> MemoryPass:
+    """Merge the week record into the account memory: one line per test read out, one for the
+    owner's verdicts. Lines about the same test are changed, not repeated."""
+    week, record = inputs["week"], inputs["week_record"]
+    current = {line["text"].split(":")[0]: line for line in inputs["current_memory"]
+               if not line.get("owner")}
+    lines: list[MemoryLineDraft] = []
+    for readout in record.get("readouts", []):
+        head = f"{readout['name'] or readout['test_id']} ({readout['angle'] or 'test'})"
+        verdict = {"scale": "worked", "stop": "did not work", "continue": "is still open"}.get(
+            readout["recommendation"], "is still open")
+        text = f"{head}: {verdict} on {readout['metric'].replace('_', ' ')}."
+        old = current.get(head)
+        lines.append(MemoryLineDraft(id=old["id"] if old else "new", text=text,
+                                     sources=[*readout["evidence_ids"][:2], f"wk-{week}"]))
+    owner = record.get("owner", {})
+    if owner.get("sent_back"):
+        head = "Owner send-backs"
+        old = current.get(head)
+        lines.append(MemoryLineDraft(
+            id=old["id"] if old else "new",
+            text=f"{head}: the owner sent back {owner['sent_back']} proposal(s) in week {week}; "
+                 "read their notes before the next plan.",
+            sources=[f"wk-{week}"]))
+    keep = inputs["max_lines"] - len([x for x in lines if x.id == "new"])
+    movable = [line for line in inputs["current_memory"] if not line.get("owner")]
+    drop = [line["id"] for line in movable[: max(0, len(inputs["current_memory"]) - keep)]]
+    return MemoryPass(drop=drop, lines=lines,
+                      summary=f"Added what week {week}'s tests and approvals showed.")
+
+
+BAD_OUTCOMES = {
+    "redo": "review sent it back",
+    "sent_back": "the owner sent it back",
+    "gate_blocked": "a house rule blocked a change",
+    "test_result": "the test missed its target",
+}
+CARE = {
+    "change_set": "Check each budget move against the house rules and the owner's notes before "
+                  "proposing it.",
+    "test_plan": "Tie every test to a reviewed finding and keep the plan small.",
+    "creative": "Check every claim against the brand constraints before handing in the copy.",
+    "findings": "Copy each number from its evidence and cite the evidence ID.",
+    "brief": "Keep the weekly brief to the week's real signals.",
+    "research": "Back every insight with a source page.",
+    "review": "Name the exact phrase to fix in each review issue.",
+}
+
+
+def _lesson_pass(inputs: dict) -> MemoryPass:
+    """Draw lessons from repeated bad outcomes. One lesson per kind of work, citing every
+    entry that went badly; the harness decides whether that is enough to keep it."""
+    journal = inputs["your_journal"]
+    current = {line["text"]: line for line in inputs["your_lessons"]}
+    by_kind: dict[str, list[str]] = {}
+    for entry in journal:
+        bad = [o for o in entry["outcomes"] if o["outcome"] in BAD_OUTCOMES and not o["good"]]
+        if bad:
+            kind = entry["topic"].split("/")[1] if "/" in entry["topic"] else entry["topic"]
+            by_kind.setdefault(kind, []).append(entry["id"])
+    lines = []
+    for kind, ids in sorted(by_kind.items()):
+        text = CARE.get(kind, f"Take more care with {kind.replace('_', ' ')}.")
+        old = current.get(text)
+        lines.append(MemoryLineDraft(id=old["id"] if old else "new", text=text, sources=ids[-4:]))
+    for note in inputs["owner_notes_for_you"]:
+        # The stand-in copies the owner's words as they are; code checks what may be kept.
+        text = note["text"].split("\n")[0][:200]
+        if text and text not in current:
+            lines.append(MemoryLineDraft(id="new", text=text, sources=[note["id"]]))
+    flagged = [f.split(":")[0] for f in inputs["flags"] if ":" in f]
+    drop = [i for i in flagged if any(line["id"] == i for line in inputs["your_lessons"])]
+    return MemoryPass(drop=drop, lines=lines[: inputs["max_lessons"]],
+                      summary=f"{len(lines)} lesson(s) from this week's outcomes.")
+
+
+def _memory_check(inputs: dict) -> MemoryCheck:
+    verdicts = []
+    for line in inputs["lines"]:
+        text = line["text"].lower()
+        risky = next((fix for phrase, fix in RISKY.items() if phrase in text), None)
+        verdicts.append(LineVerdict(line_id=line["line_id"], ok=risky is None,
+                                    reason="" if risky is None else risky))
+    return MemoryCheck(verdicts=verdicts)
+
+
+NOTE_ROUTES = (
+    ("media_buyer", ("budget", "pause", "spend", "bid", "turn off", "scale")),
+    ("producer", ("image", "headline", "copy", "video", "photo", "creative", "ad text")),
+    ("analyst", ("number", "metric", "ctr", "cpa", "cost per", "data", "signal")),
+    ("strategist", ("research", "competitor", "market", "trend")),
+    ("reviewer", ("claim", "review", "compliance")),
+)
+
+
+def _note_triage(inputs: dict) -> NoteTriage:
+    text = inputs["note"]["text"].lower()
+    if not text.rstrip().endswith("?"):
+        for role, words in NOTE_ROUTES:
+            if any(w in text for w in words):
+                return NoteTriage(action="handoff", to=role,
+                                  answer=f"Owner note {inputs['note']['id']}: take this into "
+                                         "your next piece of work.",
+                                  reason=f"It is about {role.replace('_', ' ')} work.")
+    return NoteTriage(action="answer", to="growth_lead",
+                      answer="Noted. I will take this into the next plan and say how it went.",
+                      reason="It is about the plan as a whole.")
 
 
 def offline_model(model: str = DEFAULT_MODEL, responder=offline_responder):

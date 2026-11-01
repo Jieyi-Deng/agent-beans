@@ -271,7 +271,7 @@ PLAN_KW = {
 
 
 def test_plan_passes_and_fails():
-    second = planned(name="Coach angle", evidence_ids=["ev-w1-ad_1-week"])
+    second = planned(name="Coach angle", evidence_ids=["ev-w1-ad_1-week"], exploratory=True)
     assert check_plan(TestPlanDraft(summary="s", tests=[planned(), second]), **PLAN_KW) == []
 
     assert check_plan(TestPlanDraft(summary="s", tests=[planned()]), **PLAN_KW) == [
@@ -280,6 +280,7 @@ def test_plan_passes_and_fails():
 
     bad = planned(
         name="Social proof hook",
+        exploratory=True,
         budget_weight=7,
         campaign_id="cmp_9",
         evidence_ids=["ev-other"],
@@ -299,11 +300,28 @@ def test_plan_passes_and_fails():
 
     empty = planned(
         name="Empty",
+        exploratory=True,
         evidence_ids=[],
         brief=planned().brief.model_copy(update={"insight_ids": [], "replaces_ad_id": None}),
     )
     issues = check_plan(TestPlanDraft(summary="s", tests=[planned(), empty]), **PLAN_KW)
     assert set(issues) == {"Test 1 cites no evidence.", "Test 1 has no insight IDs."}
+
+
+def test_plan_keeps_exactly_one_exploratory_test():
+    fixes = [planned(), planned(name="Coach angle")]
+    assert check_plan(TestPlanDraft(summary="s", tests=fixes), **PLAN_KW) == [
+        ("The plan marks 0 test(s) exploratory; mark exactly one, a test that tries a new "
+         "angle rather than fixing a finding.")
+    ]
+    both = [planned(exploratory=True), planned(name="Coach angle", exploratory=True)]
+    assert "marks 2 test(s) exploratory" in check_plan(
+        TestPlanDraft(summary="s", tests=both), **PLAN_KW)[0]
+    # Plans saved before the flag existed load with every test as a fix.
+    old = planned().model_dump()
+    del old["exploratory"]
+    assert PlannedTest.model_validate(old).exploratory is False
+    assert "exploratory" in PlannedTest.model_json_schema()["required"]
 
 
 def test_research():
@@ -339,7 +357,7 @@ def test_answer(ledger):
 
 
 def test_plan_shows_only_products_with_a_photo():
-    store = planned(name="Fountain", brief=planned().brief.model_copy(
+    store = planned(name="Fountain", exploratory=True, brief=planned().brief.model_copy(
         update={"product": "cat water fountain"}))
     kw = {**PLAN_KW, "products": {"dog harness", "cat water fountain"}}
     assert check_plan(TestPlanDraft(summary="s", tests=[planned(), store]), **kw) == [

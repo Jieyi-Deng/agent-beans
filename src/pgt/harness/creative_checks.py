@@ -227,6 +227,11 @@ def check_plan(
         issues.append(f"The plan has {count} test(s); it needs {min_tests} to {max_tests}.")
     if len({test.name for test in draft.tests}) != count:
         issues.append("Test names must be unique.")
+    exploratory = sum(test.exploratory for test in draft.tests)
+    if count >= 2 and exploratory != 1:
+        # Keeps the plan from shrinking to fixes only: one test always tries something new.
+        issues.append(f"The plan marks {exploratory} test(s) exploratory; mark exactly one, a "
+                      "test that tries a new angle rather than fixing a finding.")
 
     for index, test in enumerate(draft.tests):
         label = f"Test {index}"

@@ -40,6 +40,7 @@ async def run_intake(
         INSTRUCTIONS,
         facts,
         fact_version,
+        topic=f"week{week}/brief",
         task=f"Start the weekly review for week {week}. Summarize last week from the daily "
         "headlines and findings, and name what the team should look into this week.",
         done_when="The summary is two or three plain sentences. Focus lists at most three items. "
@@ -85,14 +86,18 @@ async def run_plan(
         INSTRUCTIONS,
         facts,
         fact_version,
+        topic=f"week{week}/test_plan",
         task=f"Plan two or three creative tests for week {week}. Each test responds to one or "
         "more reviewed findings and draws on at least one market insight. Put each test in an "
         "active campaign. If a test is meant to replace a tired ad, set replaces_ad_id. Each ad "
         "shows exactly one product photo, so set brief.product to one name from "
-        "products_on_file and write the angle and key message around that product alone.",
+        "products_on_file and write the angle and key message around that product alone. Mark "
+        "exactly one test exploratory: it tries a new angle or audience instead of fixing a "
+        "finding, so the plan never shrinks to fixes alone.",
         done_when="Every test cites evidence IDs from reviewed_findings and insight IDs from "
         "insights, exactly as given. budget_weight is 1-5 (code turns weights into dollars). "
-        "Test names are unique. The brief's hook is a short opening line with no made-up numbers."
+        "Test names are unique. Exactly one test has exploratory true. The brief's hook is a "
+        "short opening line with no made-up numbers."
         + (" Every review issue is fixed." if issues else ""),
         data=data,
         inputs=sorted({i for f in findings for i in f.evidence_ids}),

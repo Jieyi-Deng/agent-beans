@@ -14,6 +14,7 @@ from pydantic_ai.models import Model
 
 from pgt.harness.context import assemble
 from pgt.harness.ledger import EvidenceLedger
+from pgt.harness.memory import period_of
 from pgt.harness.verify import check_changes, check_findings
 from pgt.llm.runtime import Scope, run_role
 from pgt.roles.metrics import expected_readout
@@ -113,6 +114,7 @@ async def review_creative(
         CREATIVE_INSTRUCTIONS,
         facts,
         fact_version,
+        topic=f"{period_of(scope.loop_id, scope.sim_day)}/review/{test.test_id}",
         task=f"Review the ad written for test {test.test_id} ({test.name}). The attached sheet "
         "shows, on top, the owner's product photo first and then the 1:1 image of each of the "
         "three scenes; below, the four shots of its 10-second video (hook, benefit, proof, end "
