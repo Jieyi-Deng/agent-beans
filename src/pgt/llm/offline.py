@@ -518,7 +518,11 @@ def _creative_review(inputs: dict) -> CreativeReview:
     ad = inputs["ad"]
     text = " ".join([ad["headline"], ad["primary_text"], ad["description"]]).lower()
     issues = [fix for phrase, fix in RISKY.items() if phrase in text]
-    return CreativeReview(verdict="redo" if issues else "pass", issues=issues)
+    brief = inputs.get("brief", {})
+    checked = [f"Copy follows the brief's angle ({brief.get('angle', 'the brief')}).",
+               "No claim that needs proof (#1, best, guarantees, health)."]
+    return CreativeReview(verdict="redo" if issues else "pass", issues=issues,
+                          checked=[] if issues else checked)
 
 
 # --- Memory calls -------------------------------------------------------------------------------
@@ -613,8 +617,9 @@ def _memory_check(inputs: dict) -> MemoryCheck:
     for line in inputs["lines"]:
         text = line["text"].lower()
         risky = next((fix for phrase, fix in RISKY.items() if phrase in text), None)
-        verdicts.append(LineVerdict(line_id=line["line_id"], ok=risky is None,
-                                    reason="" if risky is None else risky))
+        verdicts.append(LineVerdict(line_id=line["line_id"],
+                                    verdict="keep" if risky is None else "reject",
+                                    reason="" if risky is None else risky, narrowed=""))
     return MemoryCheck(verdicts=verdicts)
 
 

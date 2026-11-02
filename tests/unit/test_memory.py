@@ -5,6 +5,7 @@ import asyncio
 import json
 
 import pytest
+from pydantic import BaseModel
 
 from pgt.harness import memory as mem
 from pgt.harness import safeguards as sg
@@ -17,6 +18,9 @@ from pgt.loops.close import close_week, evidence_values, freeze_week
 from pgt.roles.tools import propose_fact_tool, recall_tools
 from pgt.sandbox import fitness_app_facts
 from pgt.schemas import Evidence, MemoryLineDraft, MemoryPass
+from pgt.schemas.deliverables import Finding
+from pgt.schemas.deliverables import TestReadout as Readout
+from pgt.schemas.weekly import CreativeBrief, CreativeReview, PlannedTest, TestPlanDraft
 
 
 def workspace() -> Workspace:
@@ -25,21 +29,22 @@ def workspace() -> Workspace:
     return ws
 
 
-def entry(ws, role, day, outcome=None, topic=None, kind="ChangeSetDraft"):
+def entry(ws, role, day, outcome=None, topic=None, kind="ChangeSetDraft", decided="decided",
+          note="", detail="", evidence_ids=()):
     """A journal entry, and optionally its outcome. Returns (entry ID, outcome ID)."""
     topic = topic or f"day{day}/change_set"
     e = ws.events.append(
         "journal.entry", role,
-        {"role": role, "topic": topic, "context_hash": "h", "kind": kind, "decided": "decided",
-         "note_to_self": "", "subjects": ["cmp_1"], "week": mem.week_of(day), "day": day,
-         "notes": []},
+        {"role": role, "topic": topic, "context_hash": "h", "kind": kind, "decided": decided,
+         "evidence_ids": list(evidence_ids), "note_to_self": note, "subjects": ["cmp_1"],
+         "week": mem.week_of(day), "day": day, "notes": []},
         sim_day=day, loop_id=f"daily-d{day}")
     o = None
     if outcome:
         o = ws.events.append(
             "journal.outcome", "system",
             {"entry_id": f"j-{e.id}", "role": role, "outcome": outcome,
-             "good": mem.GOOD.get(outcome, outcome == "passed"), "detail": "", "source": "x",
+             "good": mem.GOOD.get(outcome, outcome == "passed"), "detail": detail, "source": "x",
              "topic": topic, "day": day, "week": mem.week_of(day), "simulated": False},
             sim_day=day)
     return f"j-{e.id}", (f"o-{o.id}" if o else None)
@@ -63,6 +68,12 @@ def lines(*items):
     return lambda inputs: MemoryPass(
         drop=[], lines=[MemoryLineDraft(id="new", text=t, sources=s) for t, s in items],
         summary="s")
+
+
+def verdicts(inputs, verdict="keep", reason="", narrowed=""):
+    """A Reviewer check answer with the same verdict for every line."""
+    return {"verdicts": [{"line_id": x["line_id"], "verdict": verdict, "reason": reason,
+                          "narrowed": narrowed} for x in inputs["lines"]]}
 
 
 def close(ws, model, week):
@@ -301,15 +312,208 @@ def test_the_memory_check_is_split_so_its_answer_stays_short():
 
     def check(inputs):
         seen.append(len(inputs["lines"]))
-        return {"verdicts": [{"line_id": x["line_id"], "ok": True, "reason": ""}
-                             for x in inputs["lines"]]}
+        return verdicts(inputs)
 
-    close(ws, model_with(lessons=lines(*[(t, [j1, j2]) for t in texts]), check=check), 1)
+    summary = close(ws, model_with(lessons=lines(*[(t, [j1, j2]) for t in texts]), check=check), 1)
     assert sorted(seen) == [2, 6]
+    assert summary["checked"]["media_buyer"] == {"kept": 8, "narrowed": 0, "rejected": 0}
     assert len(mem.view(ws, mem.LESSONS, "media_buyer").lines) == 8
     calls = [e.payload for e in ws.events.list("model.call")
              if e.payload.get("topic") == "week1/memory/check"]
     assert len(calls) == 2
+
+
+def test_long_sources_split_the_check_further_so_no_line_is_trimmed():
+    ws = workspace()
+    long = "no changes: " + "spend held under the cap on every campaign this week; " * 10
+    sources = [entry(ws, "media_buyer", day, "redo", decided=long[:500], note="n" * 200)[0]
+               for day in range(1, 7)]
+    seen = []
+
+    def check(inputs):
+        seen.append(len(inputs["lines"]))
+        return verdicts(inputs)
+
+    texts = [f"Check rule {n} before each budget move." for n in range(1, 7)]
+    close(ws, model_with(lessons=lines(*[(t, sources) for t in texts]), check=check), 1)
+    assert sum(seen) == 6 and max(seen) < 6
+    assert len(mem.view(ws, mem.LESSONS, "media_buyer").lines) == 6
+
+
+# --- What the memory check sees ----------------------------------------------------------------
+
+READOUT = "ev-d7-test_1-readout"
+
+
+def test_the_check_sees_a_journal_entry_past_its_first_200_characters():
+    ws = workspace()
+    ws.ledger.add(Evidence(evidence_id=READOUT, kind="insight",
+                           values={"spend": 131.54, "results": 13.0, "cost_per_result": 10.12,
+                                   "target_cost_per_result": 16.0},
+                           note="Test test_1 (cmp_3) totals through day 7"))
+    decided = (f"no changes: No changes proposed on day 7. Test 1 (cmp_3) is due for readout at "
+               f"0.63 of target cost [{READOUT}] with cost per result 10.12 under 16.0, and spend "
+               f"131.54 is not in the stop range for any ad, so nothing moves today. Results 13 "
+               f"are below the 30 needed to scale [{READOUT}], so scaling waits for volume.")
+    j, o = entry(ws, "media_buyer", 7, "passed", decided=decided, detail="published",
+                 note="Efficient at 0.63 of target but only 13 results; hold for volume.",
+                 evidence_ids=[READOUT])
+    line = "Hold scaling on efficient tests until result volume grows, even when cost is well below target"
+    seen = []
+
+    def check(inputs):
+        (item,) = inputs["lines"]
+        seen.append(item)
+        supported = "below the 30 needed to scale" in item["sources"][j]
+        return verdicts(inputs, "keep" if supported else "reject", "" if supported else "unsupported")
+
+    close(ws, model_with(lessons=lines((line, [j, o])), check=check), 1)
+    shown = seen[0]["sources"][j]
+    assert shown.index("below the 30 needed to scale") > 200  # past the old cut
+    assert "the role's own note: Efficient at 0.63" in shown
+    assert seen[0]["evidence"] == {READOUT: "spend 131.54, results 13, cost_per_result 10.12, "
+                                            "target_cost_per_result 16. Test test_1 (cmp_3) totals "
+                                            "through day 7"}
+    assert [x.text for x in mem.view(ws, mem.LESSONS, "media_buyer").lines] == [line]
+
+
+def test_a_lesson_resting_only_on_a_bare_pass_is_rejected_in_code():
+    ws = workspace()
+    bare, bare_o = entry(ws, "reviewer", 7, "passed", topic="week1/review/w1-t2",
+                         kind="CreativeReview", decided="pass", detail="published",
+                         note="W1-T2 clean alignment to brief.")
+    full, full_o = entry(ws, "reviewer", 7, "passed", topic="week1/review/w1-t1",
+                         kind="CreativeReview", detail="published",
+                         decided="pass. Checked: copy follows the brief's angle (quiet, easy "
+                                 "clean); no claim that needs proof")
+    assert sg.verdict_only(ws, bare) and sg.verdict_only(ws, bare_o)
+    assert not sg.verdict_only(ws, full)
+    checked = []
+
+    def check(inputs):
+        checked.extend(x["text"] for x in inputs["lines"])
+        return verdicts(inputs)
+
+    close(ws, model_with(lessons=lines(
+        ("Prefer concepts that stay tightly aligned to the brief", [bare, bare_o]),
+        ("Prefer copy that follows the brief's angle closely", [full, full_o])), check=check), 1)
+    ((text, problems, by),) = rejected(ws)
+    assert text.startswith("Prefer concepts") and by == "code"
+    assert "only record that the work passed" in problems[0]
+    assert checked == ["Prefer copy that follows the brief's angle closely"]
+
+
+def test_a_prefer_line_about_the_learning_phase_is_not_rejected_for_its_form():
+    ws = workspace()
+    text = "Prefer to hold edits while a campaign is still in learning phase until it exits learning"
+    j1, _ = entry(ws, "analyst", 2, "passed", topic="day2/findings", kind="Findings",
+                  decided="1 finding(s): cmp_3 info: still in learning at 4 of 50 results")
+    j2, _ = entry(ws, "analyst", 3, "passed", topic="day3/findings", kind="Findings",
+                  decided="1 finding(s): cmp_3 info: still in learning at 6 of 50 results")
+    line = mem.Line(id="l1", text=text, sources=[j1, j2], author="analyst", created_week=1,
+                    last_confirmed_week=1)
+    assert sg.line_problems(ws, mem.LESSONS, "analyst", line, fitness_app_facts()) == []
+    asked = []
+
+    def responder(body):
+        if output_name(body) == "MemoryCheck":
+            asked.append(json.dumps(body))
+        if output_name(body) == "MemoryPass" and "your_journal" in prompt_inputs(body):
+            return lines((text, [j1, j2]))(prompt_inputs(body))
+        return offline_responder(body)
+
+    close(ws, offline_model(responder=responder)[0], 1)
+    (body,) = asked
+    body = body.replace("\\n", " ")
+    assert "never a reason to reject" in body and "Prefer X when Y" in body
+    assert "instruction rather than a learning" not in body
+    assert [x.text for x in mem.view(ws, mem.LESSONS, "analyst").lines] == [text]
+
+
+ORIGINAL = "Prefer short hooks and square video when frequency stays under 2"
+
+
+@pytest.mark.parametrize("cut, why", [
+    ("Prefer square video when frequency stays under 2", None),
+    ("Always prefer square video", "widens it"),
+    ("Prefer square video", "drops the condition"),
+    ("Prefer square video when frequency stays under 2 and creatives are fresh", "adds creatives"),
+    ("Prefer square video when frequency stays under 3", "adds the number 3"),
+])
+def test_a_narrowed_line_is_kept_only_when_it_is_narrower(cut, why):
+    ws = workspace()
+    j1, _ = entry(ws, "producer", 2, "passed", decided="square video with a short hook; "
+                  "frequency 1.4")
+    j2, _ = entry(ws, "producer", 4, "passed", decided="square video again; frequency 1.6")
+    reason = "Sources show square video, not hook length."
+    summary = close(ws, model_with(
+        lessons=lines((ORIGINAL, [j1, j2])),
+        check=lambda inputs: verdicts(inputs, "narrow", reason, cut)), 1)
+    kept = [x.text for x in mem.view(ws, mem.LESSONS, "producer").lines]
+    narrowed = [e.payload for e in ws.events.list("memory.narrowed")]
+    if why is None:
+        assert kept == [cut]
+        assert [(n["from"], n["to"], n["reason"]) for n in narrowed] == [(ORIGINAL, cut, reason)]
+        assert summary["checked"]["producer"] == {"kept": 0, "narrowed": 1, "rejected": 0}
+    else:
+        assert kept == [] and narrowed == []
+        ((text, problems, by),) = rejected(ws)
+        assert (text, by) == (ORIGINAL, "code")
+        assert problems[0].startswith(f'The Reviewer narrowed it to "{cut}"') and why in problems[0]
+        assert summary["checked"]["producer"] == {"kept": 0, "narrowed": 0, "rejected": 1}
+
+
+# --- What journal entries and outcomes record ---------------------------------------------------
+
+
+def test_journal_entries_keep_what_a_review_checked_and_why_each_test_was_planned():
+    review = CreativeReview(verdict="pass", issues=[],
+                            checked=["The fountain matches the reference photo in all three scenes."])
+    assert mem.summarize(review) == ("pass. Checked: The fountain matches the reference photo in "
+                                     "all three scenes.")
+    assert CreativeReview.model_validate({"verdict": "pass", "issues": []}).checked == []
+    brief = CreativeBrief(product="dog harness", angle="Effortless", hook="h", key_message="k",
+                          insight_ids=[], replaces_ad_id=None)
+    plan = TestPlanDraft(summary="s", tests=[PlannedTest(
+        name="Walk-test volume", hypothesis="The owner video beat target at 10.12 vs 16; more "
+        "budget shows whether it holds at volume.", campaign_id="cmp_1", budget_weight=3,
+        metric="cost_per_result", stop_rule="stop above 1.5x target", evidence_ids=[READOUT],
+        exploratory=False, brief=brief)])
+    decided = mem.summarize(plan)
+    assert "beat target at 10.12 vs 16" in decided and f"[{READOUT}]" in decided
+    assert mem.cited_evidence(plan) == [READOUT]
+
+
+class Stub(BaseModel):
+    name: str
+
+
+def test_outcomes_carry_what_followed_and_a_plain_pass_stays_plain():
+    ws = workspace()
+    ws.ledger.add(Evidence(evidence_id=READOUT, kind="insight",
+                           values={"results": 13.0, "cost_per_result": 10.12,
+                                   "target_cost_per_result": 16.0}, note="totals"))
+    plan, _ = entry(ws, "growth_lead", 1, topic="week1/test_plan", kind="TestPlanDraft")
+    entry(ws, "analyst", 7, topic="day7/readout/w1-t1", kind="TestReadout")
+    ws.artifacts.publish("day7/readout/w1-t1", Readout(
+        test_id="w1-t1", recommendation="continue", rationale="Under target, few results.",
+        findings=[Finding(subject_id="w1-t1", claim="c", metric="cost_per_result", value=10.12,
+                          evidence_ids=[READOUT], severity="info")]), "analyst", sim_day=7)
+    checked, _ = entry(ws, "producer", 3, topic="week1/creative/w1-t1", kind="CreativeSet")
+    plain, _ = entry(ws, "producer", 3, topic="week1/creative/w1-t2", kind="CreativeSet")
+    for t in ("w1-t1", "w1-t2"):
+        ws.artifacts.publish(f"week1/creative/{t}", Stub(name=t), "producer")
+    ws.artifacts.publish("week1/review/w1-t1", CreativeReview(
+        verdict="pass", issues=[], checked=["Fountain matches the reference photo."]), "reviewer")
+    ws.artifacts.publish("week1/review/w1-t2", CreativeReview(verdict="pass", issues=[]),
+                         "reviewer")
+    mem.record_outcomes(ws)
+    detail = {(o.payload["entry_id"], o.payload["outcome"]): o.payload["detail"]
+              for o in ws.events.list("journal.outcome")}
+    assert detail[(plan, "test_result")] == (
+        f"w1-t1: continue. Cost per result 10.12 vs target 16, 13 results [{READOUT}]")
+    assert detail[(checked, "passed")] == "published; review checked: Fountain matches the reference photo."
+    assert detail[(plain, "passed")] == "published"
 
 
 # --- Rollback, expiry, contradiction -----------------------------------------------------------

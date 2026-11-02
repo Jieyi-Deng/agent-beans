@@ -145,6 +145,88 @@ def line_problems(ws, store: str, role: str | None, line: mem.Line,
     return problems
 
 
+# --- What a source can support -----------------------------------------------------------------
+
+VERDICT_ONLY = {"pass", "passed", "approved", "redo", "ok"}
+BARE_DETAIL = {"", "published", "approved"}
+
+
+def verdict_only(ws, source: str) -> bool:
+    """True when a journal entry or outcome records only that the work passed: decided is a bare
+    verdict with no evidence, or the outcome is passed or approved with nothing more. The role's
+    own note does not count; that is the role grading itself."""
+    m = re.fullmatch(r"(j|o)-(\d+)", source)
+    found = _event(ws, int(m.group(2))) if m else None
+    if found is None:
+        return False
+    etype, _actor, p = found
+    if etype == "journal.entry":
+        decided = re.sub(r"[^a-z ]", "", str(p.get("decided", "")).lower()).strip()
+        return decided in VERDICT_ONLY and not p.get("evidence_ids")
+    if etype == "journal.outcome":
+        return p.get("outcome") in {"passed", "approved"} and \
+            str(p.get("detail") or "").strip().lower() in BARE_DETAIL
+    return False
+
+
+# --- A narrowed line -----------------------------------------------------------------------------
+
+WIDER = re.compile(r"\b(always|all|every|any|anything|everything|whenever|regardless|more|most|"
+                   r"each)\b", IC)
+CONDITION = re.compile(r"\b(when|if|until|unless|while|only|after|before|once|as long as)\b"
+                       r"([^,.;]*)", IC)
+NUMBER = re.compile(r"\d+(?:\.\d+)?")
+FREE_WORDS = {
+    "prefer", "keep", "avoid", "check", "hold", "wait", "with", "from", "that", "this", "these",
+    "those", "they", "them", "their", "there", "into", "onto", "over", "under", "than", "then",
+    "when", "until", "unless", "while", "only", "after", "before", "once", "still", "least",
+    "about", "within", "where", "which", "what", "have", "has", "been", "being", "were", "will",
+    "would", "should", "could", "also", "both", "same", "such", "some", "here", "your", "ours",
+    "even", "well", "just", "very", "much", "really", "rather",
+}
+
+
+def _stem(word: str) -> str:
+    word = word.lower()
+    for suffix in ("ing", "ed", "es", "s", "ly", "e"):
+        if len(word) > len(suffix) + 3 and word.endswith(suffix):
+            return word[: -len(suffix)]
+    return word
+
+
+def _content(text: str) -> set[str]:
+    return {_stem(w) for w in re.findall(r"[A-Za-z][A-Za-z_'-]{3,}", text)
+            if w.lower() not in FREE_WORDS}
+
+
+def narrower_problem(original: str, narrowed: str, sources_text: str) -> str | None:
+    """Why `narrowed` is not a narrower version of `original`, or None. Narrower means: it keeps
+    every condition the original had, adds no word that widens it, and says nothing that neither
+    the original nor its sources say."""
+    if not narrowed.strip():
+        return "the rewrite is empty"
+    if _norm(narrowed) == _norm(original):
+        return "the rewrite is the same line"
+    if len(narrowed) > 300:
+        return "the rewrite is longer than 300 characters"
+    if wider := sorted({w.lower() for w in WIDER.findall(narrowed)}
+                       - {w.lower() for w in WIDER.findall(original)}):
+        return f"the rewrite adds {', '.join(repr(w) for w in wider)}, which widens it"
+    kept = _content(narrowed)
+    for _word, clause in CONDITION.findall(original):
+        if _content(clause) - kept:
+            return f"the rewrite drops the condition '{clause.strip()}'"
+    known = _content(original) | _content(sources_text)
+    new = [w for w in dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z_'-]{3,}", narrowed))
+           if w.lower() not in FREE_WORDS and _stem(w) not in known]
+    if new:
+        return f"the rewrite adds {', '.join(new[:3])}, which neither the line nor its sources say"
+    numbers = set(NUMBER.findall(original)) | set(NUMBER.findall(sources_text))
+    if (new_numbers := sorted(set(NUMBER.findall(narrowed)) - numbers)):
+        return f"the rewrite adds the number {new_numbers[0]}, which its sources do not give"
+    return None
+
+
 def topic_kind(topic: str | None) -> str:
     """"day4/change_set" -> "change_set"; "week2/creative/w2-t1" -> "creative"."""
     if not topic:

@@ -58,10 +58,11 @@ It never permits anything the shared facts or house rules forbid, and only the o
 
 MEMORY_REVIEW = """\
 You are the Reviewer on a small AI growth team that runs Meta ads for one advertiser. Before a
-memory line is kept, you check it the way an editor checks a claim: is it supported by the
-sources it cites, and does it stay inside the owner's charter and house rules? A line that would
-loosen a rule, permit what the facts forbid, or that reads like an instruction rather than a
-learning is rejected."""
+memory line is kept, you check it the way an editor checks a claim: do the sources it cites
+support it, and does it stay inside the owner's charter and house rules? Lessons are written as
+care or a preference ("Prefer X when Y", "Check X before Y"); that form is expected and is never
+a reason to reject. You judge what the sources show, not how the line is phrased. A line that
+would loosen a rule or permit what the facts forbid is rejected however well it is supported."""
 
 
 def role_instructions(role: str) -> str:
@@ -150,12 +151,20 @@ async def run_memory_check(
         fact_version,
         topic=f"week{week}/memory/check",
         task="Check each proposed memory line against the shared facts and house rules, and "
-        "against what its cited sources say.",
-        done_when="One verdict per line, with its line_id, and nothing else. ok is false when "
-        "the line loosens a house rule or constraint, permits what the facts forbid, claims what "
-        "its sources do not support, or reads like an instruction rather than a learning; reason "
-        "says why in one sentence of at most 20 words, and is empty when ok. Answer with "
-        "verdicts: a list of {\"line_id\", \"ok\", \"reason\"}.",
+        "against what its cited sources say. Each source gives its text (with the role's own "
+        "note where it wrote one), and evidence gives the numbers behind the evidence IDs those "
+        "sources cite.",
+        done_when="One verdict per line, with its line_id, and nothing else. verdict is keep "
+        "when the sources support the whole line. verdict is narrow when they support only part "
+        "of it: narrowed is the line cut down to that part, in the same form, keeping every "
+        "condition it had and adding no new claim and no wider word (always, all, more, every). "
+        "verdict is reject when the sources support none of it, or the line loosens a house rule "
+        "or constraint, or permits what the facts forbid. An outcome that only says passed or "
+        "published shows the work was accepted, not why it worked; a role's own note shows its "
+        "reasoning at the time, while numbers, readouts and the owner's words show what held. "
+        "reason says why in one sentence of at most 20 words, and is empty on "
+        "keep; narrowed is empty unless verdict is narrow. Answer with verdicts: a list of "
+        "{\"line_id\", \"verdict\", \"reason\", \"narrowed\"}.",
         data={"week": week, "lines": lines},
     )
     return await run_role("reviewer", MemoryCheck, pack, scope, model,

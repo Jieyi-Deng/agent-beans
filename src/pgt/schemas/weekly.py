@@ -167,6 +167,15 @@ class CreativeReview(_Out):
 
     verdict: Literal["pass", "redo"]
     issues: list[str]  # required fixes, one per line; empty on pass
+    checked: list[str]  # what the review looked at and found holds, one short line each
+
+    @model_validator(mode="before")
+    @classmethod
+    def _older_review(cls, data):
+        """Reviews saved before they recorded what was checked."""
+        if isinstance(data, dict) and "checked" not in data:
+            return {**data, "checked": []}
+        return data
 
 
 # --- Built in code ---------------------------------------------------------------------------

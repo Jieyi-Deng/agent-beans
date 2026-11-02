@@ -30,7 +30,7 @@ from pgt.schemas import (
 
 
 async def _always_pass(*args, **kwargs) -> CreativeReview:
-    return CreativeReview(verdict="pass", issues=[])
+    return CreativeReview(verdict="pass", issues=[], checked=[])
 
 
 def _allow_all(changes, state, facts) -> list[GateResult]:

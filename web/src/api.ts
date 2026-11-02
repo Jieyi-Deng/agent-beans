@@ -134,7 +134,10 @@ export type MemoryData = {
   weeks: { week: number; stub: string; event_id: number }[]; closed: number[];
   notes: Note[]; proposals: MemProposal[]; fact_proposals: FactProposal[];
   charter: Record<string, unknown> | null; charter_version: number;
-  rejected: Rejected[]; reverted: { id: number; ts: string; role: string; from_version: number;
+  rejected: Rejected[];
+  narrowed?: { id: number; ts: string; store: string; role: string | null; line_id: string; from: string;
+               to: string; sources: string[]; reason: string; week: number }[];
+  reverted: { id: number; ts: string; role: string; from_version: number;
     to_version: number; reason: string }[];
   collapse: { id: number; role: string; reason: string }[];
   failed: { id: number; pass: string; week: number; error: string }[];

@@ -546,6 +546,7 @@ async def produce_week(
             issues += check_design(concept, laid_out)
             issues += check_captions(concept, captions)
             by = "code"
+            checked: list[str] = []
             if not issues:
                 try:
                     review = await review_creative(
@@ -557,10 +558,12 @@ async def produce_week(
                     _review_failed(scope, week, test.test_id, creative_id, creative_rec, exc)
                     return None
                 issues = [] if review.verdict == "pass" else review.issues or ["Redo requested."]
+                checked = review.checked
                 by = "reviewer"
             ws.artifacts.publish(
                 f"week{week}/review/{test.test_id}",
-                CreativeReview(verdict="redo" if issues else "pass", issues=issues),
+                CreativeReview(verdict="redo" if issues else "pass", issues=issues,
+                               checked=checked),
                 "reviewer",
                 inputs=[creative_rec.artifact_id],
                 sim_day=account.day,

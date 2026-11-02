@@ -120,7 +120,9 @@ async def review_creative(
         "three scenes; below, the four shots of its 10-second video (hook, benefit, proof, end "
         "card).",
         done_when="verdict is pass when nothing needs fixing, with no issues; otherwise redo with "
-        "one line per required fix.",
+        "one line per required fix. checked lists what you looked at and found holds, one short "
+        "line each, naming the scene or element (for example: the fountain in all three scenes "
+        "matches the reference photo). Answer with verdict, issues and checked.",
         data=data,
         inputs=test.evidence_ids,
     )
