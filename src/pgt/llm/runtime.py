@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from time import perf_counter
 from typing import Any
@@ -44,6 +45,7 @@ TOOL_DEADLINE_S = 30.0
 IMAGE_DEADLINE_S = 90.0  # Muse Image and SAM 3.1
 ASK_DEADLINE_S = 300.0  # an ask_* tool runs another role's call
 NOTE_LINES, NOTE_CHARS = 2, 240
+NOTE_MAX = NOTE_LINES * NOTE_CHARS  # the whole note, in characters
 
 FAILURES = ("timeout", "schema", "provider", "spend_cap", "blocked_tool")
 
@@ -127,9 +129,13 @@ def with_note[T: BaseModel](output_type: type[T]) -> type[T]:
         "__qualname__": output_type.__qualname__,
         "model_config": ConfigDict(**{**output_type.model_config,
                                       "json_schema_extra": _require_note}),
+        # maxLength reaches the model as a hint (strict schemas move it into the description);
+        # code trims a longer note rather than failing the deliverable over it.
         "note_to_self": Field(
-            "", description="Optional: up to two short lines you want to remember next time "
-            "about this decision. Empty string if nothing."),
+            "", description=f"Optional: at most {NOTE_LINES} short lines (under {NOTE_MAX} "
+            "characters in all) you want to remember next time about this decision. Not your "
+            "working and never part of the deliverable. Empty string if nothing.",
+            json_schema_extra={"maxLength": NOTE_MAX}),
     }
     return type(output_type.__name__, (output_type,), namespace)
 
@@ -398,10 +404,12 @@ async def run_role[T: BaseModel](
     tools: list = (),
     attachments: list[BinaryContent] = (),
     capabilities: list[AbstractCapability] = (),
+    settings: dict | None = None,
+    check: Callable[[T], str | None] | None = None,
 ) -> T:
     """Run one role and return its typed deliverable (strict JSON schema output)."""
     run = await run_role_full(
-        role, output_type, pack, scope, model, tools, attachments, capabilities
+        role, output_type, pack, scope, model, tools, attachments, capabilities, settings, check
     )
     return run.output
 
@@ -493,10 +501,13 @@ async def run_role_full[T: BaseModel](
     attachments: list[BinaryContent] = (),
     capabilities: list[AbstractCapability] = (),
     settings: dict | None = None,
+    check: Callable[[T], str | None] | None = None,
 ) -> RoleRun[T]:
     """Like run_role, plus hosted search counts and citations. `attachments` are images the
     model sees with the prompt (the Reviewer's vision check). `capabilities` add hosted tools;
-    callers check the allowlist before adding one. `settings` add model settings."""
+    callers check the allowlist before adding one. `settings` add model settings. `check`
+    returns a problem with a schema-valid deliverable, or None; a problem sends the answer back
+    once with it as feedback, and the second answer is returned whatever it says."""
     model = resolve(model, role)
     pack = with_memory(pack, scope)
     tools = [*tools, *memory_tools(scope, role)]
@@ -514,6 +525,8 @@ async def run_role_full[T: BaseModel](
         model_settings={"tool_choice": "auto", "openai_store": False, **(settings or {})},
     )
     agent.instrument = False
+    if check is not None:
+        agent.output_validator(_send_back_once(check, output_type, role, scope, pack))
     _log_context(scope, role, pack, list(attachments))
     prompt = [pack.prompt, *attachments] if attachments else pack.prompt
     result = await agent.run(prompt)
@@ -525,6 +538,26 @@ async def run_role_full[T: BaseModel](
     )
     return RoleRun(output, harness.searches, list(dict.fromkeys(harness.citations)), note,
                    entry_id)
+
+
+def _send_back_once[T: BaseModel](check: Callable[[T], str | None], output_type: type[T],
+                                  role: str, scope: Scope, pack: ContextPack):
+    sent = False
+
+    def validate(ctx: RunContext, output):
+        nonlocal sent
+        if sent or ctx.retry >= ctx.max_retries:
+            return output
+        problem = check(split_note(output, output_type)[0])
+        if not problem:
+            return output
+        sent = True
+        scope.ws.events.append("output.sent_back", role,
+                               {"role": role, "topic": pack.topic, "reason": problem[:300]},
+                               sim_day=scope.sim_day, loop_id=scope.loop_id)
+        raise ModelRetry(problem)
+
+    return validate
 
 
 def _note_ids(pack: ContextPack) -> list[str]:

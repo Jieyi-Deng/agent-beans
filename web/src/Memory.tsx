@@ -102,15 +102,45 @@ function Versions({ store }: { store: MemStore }) {
   );
 }
 
-function Store({ store, kind, role, act, busy, hint }: {
+function passName(pass: string) {
+  return pass === "account" ? "account pass" : `${roleWho(pass).name}'s lesson pass`;
+}
+
+// Why the last closed week left this store as it is: a pass that came back empty or failed,
+// and lines the checks did not keep.
+function storeNotes(m: MemoryData, kind: "account" | "lessons", role: string | null): string[] {
+  const pass = kind === "account" ? "account" : role ?? "";
+  const week = m.closed.length ? Math.max(...m.closed) : null;
+  if (week === null) return [];
+  const out: string[] = [];
+  for (const e of (m.empty ?? []).filter((x) => x.pass === pass && x.week === week))
+    out.push(`Week ${week}: the ${passName(pass)} came back with no lines, although its summary said "${e.summary}". It was sent back once and still wrote nothing.`);
+  for (const f of m.failed.filter((x) => x.pass === pass && x.week === week))
+    out.push(`Week ${week}: the ${passName(pass)} failed (${f.error}).`);
+  const held = m.failed.some((x) => x.pass.startsWith("check") && x.week === week);
+  if (held) out.push(`Week ${week}: the Reviewer's memory check could not run, so new lines were held back.`);
+  const rejected = m.rejected.filter((r) => r.week === week && r.store === kind && (kind === "account" || r.role === role));
+  if (rejected.length)
+    out.push(`Week ${week}: ${rejected.length} proposed line${rejected.length === 1 ? " was" : "s were"} not kept. See Checks for why.`);
+  return out;
+}
+
+function Store({ store, kind, role, act, busy, hint, notes }: {
   store: MemStore; kind: "account" | "lessons"; role: string | null; act: Act; busy: boolean; hint: string;
+  notes: string[];
 }) {
   const order = { active: 0, watch: 1, inactive: 2, struck: 3 };
   const lines = [...store.lines].sort((a, b) => order[a.status] - order[b.status]);
   return (
     <div className="col" style={{ gap: 12 }}>
       {lines.length ? <div className="mlines">{lines.map((l) => <LineRow key={l.id} line={l} store={kind} role={role} act={act} busy={busy} />)}</div>
-        : <div className="empty">Nothing kept yet. Lines appear when a week closes.</div>}
+        : !notes.length && <div className="empty">Nothing kept yet. Lines appear when a week closes.</div>}
+      {notes.length > 0 && (
+        <div className="col" style={{ gap: 4 }}>
+          {!lines.length && <div className="ink" style={{ fontSize: 13 }}>Nothing kept yet.</div>}
+          {notes.map((n) => <div key={n} className="muted" style={{ fontSize: 12.5 }}>{n}</div>)}
+        </div>
+      )}
       <AddLine store={kind} role={role} act={act} busy={busy} hint={hint} />
       <Versions store={store} />
     </div>
@@ -297,11 +327,21 @@ function Checks({ m }: { m: MemoryData }) {
             <span className="mono faint">v{r.from_version} → v{r.to_version}</span><span>{r.reason}</span></div>
         )) : <div className="empty" style={{ padding: "8px 0" }}>None.</div>}
       </section>
-      {(m.collapse.length > 0 || m.failed.length > 0) && (
+      {(m.collapse.length > 0 || m.failed.length > 0 || (m.empty ?? []).length > 0) && (
         <section className="section">
           <div className="h2">Warnings</div>
           {m.collapse.map((c) => <div key={c.id} className="ver"><span className="ink">{roleWho(c.role).name}</span><span>{c.reason}</span></div>)}
-          {m.failed.map((f) => <div key={f.id} className="ver"><span className="ink">Week {f.week}</span><span>The {f.pass} pass failed: {f.error}</span></div>)}
+          {(m.empty ?? []).map((e) => <div key={e.id} className="ver"><span className="ink">Week {e.week}</span>
+            <span>The {passName(e.pass)} came back with no lines, although its summary said "{e.summary}". Nothing was written.</span></div>)}
+          {m.failed.map((f) => <div key={f.id} className="ver"><span className="ink">Week {f.week}</span><span>The {f.pass.startsWith("check") ? "memory check" : passName(f.pass)} failed: {f.error}</span></div>)}
+        </section>
+      )}
+      {(m.sent_back ?? []).length > 0 && (
+        <section className="section">
+          <div className="h2">Sent back once</div>
+          <div className="muted" style={{ fontSize: 12.5 }}>A memory pass whose answer did not match its summary gets one more try with the reason.</div>
+          {[...(m.sent_back ?? [])].reverse().map((s) => <div key={s.id} className="ver"><span className="ink">{roleWho(s.role).name}</span>
+            <span className="mono faint">{s.topic}</span><span>{s.reason}</span></div>)}
         </section>
       )}
     </div>
@@ -329,6 +369,7 @@ export default function Memory({ tick, busy, route: r, sidebar }: { tick: number
       <>
         <div className="muted" style={{ fontSize: 12.5 }}>Shared by every role. The Growth Lead merges each closed week into it; every line cites evidence, the week record or your note.</div>
         <Store store={data.account} kind="account" role={null} act={act} busy={blocked}
+               notes={storeNotes(data, "account", null)}
                hint="Add a line every role should know, for example a season, a product launch or what the audience responds to." />
       </>
     );
@@ -350,6 +391,7 @@ export default function Memory({ tick, busy, route: r, sidebar }: { tick: number
             </div>
           </div>
           {store && <Store store={store} kind="lessons" role={role} act={act} busy={blocked}
+                           notes={storeNotes(data, "lessons", role)}
                            hint={`Add a lesson for the ${roleWho(role).name}. Only you can say "never".`} />}
           <Journal role={role} tick={tick + bump} />
         </>

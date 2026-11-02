@@ -235,9 +235,12 @@ flowchart TB
     judge --> refresh["Expire lessons not confirmed for 3 weeks<br/>flag ones an outcome went against"]
     refresh --> collapse["Anti-collapse checks"]
     collapse --> passes["Growth Lead account pass<br/>each role's lesson pass"]
-    passes --> code{"Code checks<br/>source, support, loosening, injection"}
+    passes --> match{"Answer matches<br/>its summary?"}
+    match -- "no, once" --> passes
+    match -- "still no" --> empty["memory.pass_empty"]
+    match -- "yes" --> code{"Code checks<br/>source, support, loosening, injection"}
     code -- "fail" --> rej["memory.rejected"]
-    code -- "pass" --> rev{"Reviewer check"}
+    code -- "pass" --> rev{"Reviewer check<br/>6 lines per call"}
     rev -- "fail" --> rej
     rev -- "could not run" --> held["Lines held back,<br/>escalated to the owner"]
     rev -- "pass" --> ver["New version<br/>owner lines kept verbatim"]
@@ -253,6 +256,9 @@ flowchart TB
 | Anti-collapse | The Media Buyer is flagged when it changes nothing on days with "act" signals; the test plan must keep one exploratory test, so it never shrinks to fixes alone |
 | Data is never an instruction | Text that reads like an instruction to the model is rejected wherever it came from: an owner note, a campaign name, a model's own line |
 | The owner is final | Owner lines are locked, and proposals wait for the owner |
+| Nothing lost in silence | A pass whose lines and drops are both empty while its summary says it added or changed something is sent back once with that reason. If it is still empty, code logs `memory.pass_empty` with the role, store, week and summary, `week.closed` lists it under `empty`, and the Memory view says so on the store and under Checks |
+
+Each pass sees the numbers behind what it cites, not only the IDs. The account pass gets the week record's one-line summary, its test readouts, and an `evidence` map with one short value line per evidence ID the record cites (at most 16). A lesson pass gets the same map for the evidence its journal cites: in what it decided, in outcome details, and in the artifacts its outcomes point at (a change set, a test readout). The Reviewer's memory check gets at most 6 lines per call and a 6,000-token output limit, with one short reason per verdict, so its answer cannot run into the output limit. Each task also names the answer's fields (`lines` as `{id, text, sources}`, `drop`, `summary`): in a live run the model planned its lines under a field name it guessed, and the strict schema then left `lines` empty.
 
 ## Deadlines and failures
 
@@ -265,7 +271,7 @@ flowchart TB
 
 Every failed call carries a `failure` field: `timeout`, `schema`, `provider`, `spend_cap` or `blocked_tool`. The Harness view counts them per role. A failed call is never judged as the work of the role it was checking: when a Reviewer call fails, the owner sees "Review could not run for ...", the deliverable is escalated, and nothing is sent back to the Producer.
 
-Two repairs run before the schema check, both for answers seen live on Baseten. A tool call the model writes as text (`<x:invoke name="final_result">` markup) becomes the real call, when that tool was offered in the request. JSON followed by whitespace up to the output limit loses the whitespace and gets its open brackets closed; a cut inside a value is left alone. Neither repair adds content: the answer still has to pass the strict schema, and the `model.call` event lists the repair under `repaired`. The code is `src/pgt/llm/repair.py`; the tests are in `tests/unit/test_baseten.py`.
+Three repairs run before the schema check, all for answers seen live on Baseten. A tool call the model writes as text (`<x:invoke name="final_result">` markup) becomes the real call, when that tool was offered in the request. JSON followed by whitespace up to the output limit loses the whitespace and gets its open brackets closed; a cut inside a value is left alone. JSON cut off inside `note_to_self`, the last field and never part of the deliverable, keeps the first 480 characters of the note and gets closed; a cut anywhere else is left alone. The note is also capped in the schema and the team rules (two short lines, under 480 characters), and code trims it to two lines before it reaches the journal. No repair adds content: the answer still has to pass the strict schema, and the `model.call` event lists the repair under `repaired`. The code is `src/pgt/llm/repair.py`; the tests are in `tests/unit/test_baseten.py`.
 
 ## Spend control
 

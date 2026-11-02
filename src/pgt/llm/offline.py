@@ -537,7 +537,7 @@ def _account_pass(inputs: dict) -> MemoryPass:
     current = {line["text"].split(":")[0]: line for line in inputs["current_memory"]
                if not line.get("owner")}
     lines: list[MemoryLineDraft] = []
-    for readout in record.get("readouts", []):
+    for readout in inputs.get("readouts") or record.get("readouts", []):
         head = f"{readout['name'] or readout['test_id']} ({readout['angle'] or 'test'})"
         verdict = {"scale": "worked", "stop": "did not work", "continue": "is still open"}.get(
             readout["recommendation"], "is still open")
@@ -557,8 +557,9 @@ def _account_pass(inputs: dict) -> MemoryPass:
     keep = inputs["max_lines"] - len([x for x in lines if x.id == "new"])
     movable = [line for line in inputs["current_memory"] if not line.get("owner")]
     drop = [line["id"] for line in movable[: max(0, len(inputs["current_memory"]) - keep)]]
-    return MemoryPass(drop=drop, lines=lines,
-                      summary=f"Added what week {week}'s tests and approvals showed.")
+    summary = (f"Added what week {week}'s tests and approvals showed." if lines or drop
+               else f"No change: week {week} had no test readouts or send-backs.")
+    return MemoryPass(drop=drop, lines=lines, summary=summary)
 
 
 BAD_OUTCOMES = {
@@ -602,8 +603,9 @@ def _lesson_pass(inputs: dict) -> MemoryPass:
             lines.append(MemoryLineDraft(id="new", text=text, sources=[note["id"]]))
     flagged = [f.split(":")[0] for f in inputs["flags"] if ":" in f]
     drop = [i for i in flagged if any(line["id"] == i for line in inputs["your_lessons"])]
-    return MemoryPass(drop=drop, lines=lines[: inputs["max_lessons"]],
-                      summary=f"{len(lines)} lesson(s) from this week's outcomes.")
+    summary = (f"{len(lines)} lesson(s) from this week's outcomes." if lines or drop
+               else "No change: no repeated bad outcomes this week.")
+    return MemoryPass(drop=drop, lines=lines[: inputs["max_lessons"]], summary=summary)
 
 
 def _memory_check(inputs: dict) -> MemoryCheck:

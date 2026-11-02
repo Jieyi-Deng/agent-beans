@@ -72,6 +72,11 @@ def memory_state(ws) -> dict:
                      for e in ws.events.list("memory.reverted")],
         "collapse": [{"id": e.id, **e.payload} for e in ws.events.list("memory.collapse")],
         "failed": [{"id": e.id, **e.payload} for e in ws.events.list("memory.pass_failed")],
+        "empty": [{"id": e.id, **e.payload} for e in ws.events.list("memory.pass_empty")],
+        "sent_back": [{"id": e.id, "role": e.payload.get("role"), "topic": e.payload["topic"],
+                       "reason": e.payload.get("reason", "")}
+                      for e in ws.events.list("output.sent_back")
+                      if "/memory/" in (e.payload.get("topic") or "")][-40:],
     }
 
 

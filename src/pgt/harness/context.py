@@ -37,6 +37,9 @@ Team rules:
 - Policy is checked by code after you answer. Propose what the evidence supports; do not try to
   work around house rules.
 - Return only the requested deliverable."""
+# PGT answers carry a note_to_self field; the bench arms share TEAM_RULES but not this.
+NOTE_RULE = ("- note_to_self is at most two short lines for next time: never your working, and "
+             "never the deliverable itself.")
 
 # Which tool fetches what a trimmed section left out, per role.
 EVIDENCE_TOOL_ROLES = frozenset({"analyst", "media_buyer"})
@@ -241,8 +244,8 @@ def assemble(
     must = [
         Section(name="role", place="instructions", must_keep=True,
                 text=role_instructions.strip(), tokens=0),
-        Section(name="team_rules", place="instructions", must_keep=True, text=TEAM_RULES,
-                tokens=0),
+        Section(name="team_rules", place="instructions", must_keep=True,
+                text=f"{TEAM_RULES}\n{NOTE_RULE}", tokens=0),
         Section(name="charter", place="instructions", must_keep=True,
                 text=f"Shared facts (version {fact_version}), the team's charter, set by the "
                      f"owner:\n{facts_json}", tokens=0),
