@@ -139,9 +139,12 @@ async def run_answer(
         f"{hashlib.sha1(question.encode()).hexdigest()[:8]}",
         task="Answer the question from a teammate in one or two plain sentences, using only the "
         "evidence given.",
+        # The schema may not reach the model as a format it reads, so the fields are named here.
         done_when="The answer cites the evidence IDs it uses, and every number in it is copied "
         "from that evidence. If the evidence cannot answer the question, say so and cite the "
-        "closest evidence." + (" Every review issue is fixed." if issues else ""),
+        "closest evidence." + (" Every review issue is fixed." if issues else "")
+        + " Hand it in with final_result: answer is the one or two sentences, evidence_ids "
+        "lists each evidence ID the answer cites, and note_to_self is empty or a short note.",
         data=data,
         inputs=[e.evidence_id for e in evidence],
     )

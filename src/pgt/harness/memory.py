@@ -12,7 +12,8 @@ Role memory, read only by its own role:
 
 Nothing is edited in place: a new version is a new event, and owner edits are events applied on
 top of the latest version. An owner line is locked: a role's pass cannot change or drop it, and
-any change it tries becomes a proposal the owner accepts or rejects.
+any change it tries becomes a proposal the owner accepts or rejects. So does a line that would
+loosen a check, gate or habit: it applies only once the owner approves it, as an owner line.
 """
 
 from __future__ import annotations
@@ -137,7 +138,8 @@ def _apply_edit(ws, lines: list[Line], edit) -> list[Line]:
     action, line_id = p["action"], p.get("line_id")
     week = p.get("week")
     if action == "add":
-        return [*lines, Line(id=f"m-{edit.id}", text=p["text"], sources=[f"e-{edit.id}"],
+        return [*lines, Line(id=f"m-{edit.id}", text=p["text"],
+                             sources=[*p.get("sources", []), f"e-{edit.id}"],
                              author="owner", locked=True, created_week=week,
                              last_confirmed_week=week)]
     out, seen = [], False
@@ -154,7 +156,7 @@ def _apply_edit(ws, lines: list[Line], edit) -> list[Line]:
 
 
 def _edited(line: Line, action: str, p: dict, event_id: int) -> Line:
-    sources = [*line.sources, f"e-{event_id}"]
+    sources = [*(p.get("sources") or line.sources), f"e-{event_id}"]
     if action == "edit":
         return line.model_copy(update={"text": p["text"], "author": "owner", "locked": True,
                                        "sources": sources, "status": "active", "flag": None})
@@ -188,8 +190,10 @@ def owner_edit(ws, store: str, role: str | None, action: str, line_id: str | Non
     return event.id
 
 
-def resolve_proposal(ws, proposal_id: int, accepted: bool) -> None:
-    """The owner accepts or rejects a role's proposed change to an owner line."""
+def resolve_proposal(ws, proposal_id: int, accepted: bool, week: int | None = None) -> None:
+    """The owner accepts or declines a role's proposal: a change to an owner line, or a line
+    that would loosen a check, gate or habit. An accepted loosening line is written as the
+    owner's line, with the role's sources; a declined one is dropped. Both stay on record."""
     found = [e for e in ws.events.list("memory.proposed", since_id=proposal_id - 1)
              if e.id == proposal_id]
     if not found:
@@ -198,11 +202,16 @@ def resolve_proposal(ws, proposal_id: int, accepted: bool) -> None:
     if any(e.payload.get("proposal_id") == proposal_id
            for e in ws.events.list("memory.proposal_resolved")):
         raise ValueError("Already resolved")
-    action = "strike" if not p.get("text") else "edit"
+    extra = {}
+    if p.get("kind") == "loosening":
+        action = "add" if p.get("new") else "edit"
+        extra = {"kind": "loosening", "sources": p.get("sources", []), "week": week}
+    else:
+        action = "strike" if not p.get("text") else "edit"
     ws.events.append("memory.proposal_resolved", "user",
                      {"proposal_id": proposal_id, "store": p["store"], "role": p.get("role"),
                       "accepted": accepted, "action": action, "line_id": p["line_id"],
-                      "text": p.get("text", "")})
+                      "text": p.get("text", ""), **extra})
 
 
 def open_proposals(ws) -> list:

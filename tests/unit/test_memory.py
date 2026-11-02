@@ -15,6 +15,7 @@ from pgt.llm.fake import output_name, prompt_inputs
 from pgt.llm.offline import offline_model, offline_responder
 from pgt.llm.runtime import Scope
 from pgt.loops.close import close_week, evidence_values, freeze_week
+from pgt.roles import memory_passes as passes
 from pgt.roles.tools import propose_fact_tool, recall_tools
 from pgt.sandbox import fitness_app_facts
 from pgt.schemas import Evidence, MemoryLineDraft, MemoryPass
@@ -50,13 +51,16 @@ def entry(ws, role, day, outcome=None, topic=None, kind="ChangeSetDraft", decide
     return f"j-{e.id}", (f"o-{o.id}" if o else None)
 
 
-def model_with(lessons=None, check=None):
-    """The offline stand-in, with chosen lesson lines and, optionally, a broken Reviewer."""
+def model_with(lessons=None, check=None, account=None):
+    """The offline stand-in, with chosen lesson or account lines and, optionally, a chosen
+    memory check."""
     def responder(body):
         name = output_name(body)
         inputs = prompt_inputs(body)
         if name == "MemoryPass" and "your_journal" in inputs and lessons is not None:
             return lessons(inputs)
+        if name == "MemoryPass" and "your_journal" not in inputs and account is not None:
+            return account(inputs)
         if name == "MemoryCheck" and check is not None:
             return check(inputs)
         return offline_responder(body)
@@ -70,10 +74,12 @@ def lines(*items):
         summary="s")
 
 
-def verdicts(inputs, verdict="keep", reason="", narrowed=""):
-    """A Reviewer check answer with the same verdict for every line."""
+def verdicts(inputs, verdict="keep", reason="", narrowed="", direction="neutral",
+             direction_reason=""):
+    """A memory check answer with the same verdict for every line."""
     return {"verdicts": [{"line_id": x["line_id"], "verdict": verdict, "reason": reason,
-                          "narrowed": narrowed} for x in inputs["lines"]]}
+                          "narrowed": narrowed, "direction": direction,
+                          "direction_reason": direction_reason} for x in inputs["lines"]]}
 
 
 def close(ws, model, week):
@@ -316,7 +322,7 @@ def test_the_memory_check_is_split_so_its_answer_stays_short():
 
     summary = close(ws, model_with(lessons=lines(*[(t, [j1, j2]) for t in texts]), check=check), 1)
     assert sorted(seen) == [2, 6]
-    assert summary["checked"]["media_buyer"] == {"kept": 8, "narrowed": 0, "rejected": 0}
+    assert summary["checked"]["media_buyer"] == {"kept": 8, "narrowed": 0, "proposed": 0, "rejected": 0}
     assert len(mem.view(ws, mem.LESSONS, "media_buyer").lines) == 8
     calls = [e.payload for e in ws.events.list("model.call")
              if e.payload.get("topic") == "week1/memory/check"]
@@ -433,6 +439,18 @@ def test_a_prefer_line_about_the_learning_phase_is_not_rejected_for_its_form():
 ORIGINAL = "Prefer short hooks and square video when frequency stays under 2"
 
 
+def test_a_condition_runs_through_its_list():
+    # Live run golden16: the Analyst cut "story" from the Reviewer's pass condition and called
+    # it narrower; a pass with fewer conditions is looser.
+    line = ("Prefer passing when product match, legibility and story stay clean across scenes "
+            "and video")
+    cut = "Prefer passing when product match and legibility stay clean across scenes and video"
+    assert "drops the condition" in sg.narrower_problem(line, cut, "")
+    # A comma that starts the next instruction ends the condition, so that part may go.
+    assert sg.narrower_problem("Prefer square video when frequency stays under 2, keep hooks short",
+                               "Prefer square video when frequency stays under 2", "") is None
+
+
 @pytest.mark.parametrize("cut, why", [
     ("Prefer square video when frequency stays under 2", None),
     ("Always prefer square video", "widens it"),
@@ -454,13 +472,171 @@ def test_a_narrowed_line_is_kept_only_when_it_is_narrower(cut, why):
     if why is None:
         assert kept == [cut]
         assert [(n["from"], n["to"], n["reason"]) for n in narrowed] == [(ORIGINAL, cut, reason)]
-        assert summary["checked"]["producer"] == {"kept": 0, "narrowed": 1, "rejected": 0}
+        assert summary["checked"]["producer"] == {"kept": 0, "narrowed": 1, "proposed": 0, "rejected": 0}
     else:
         assert kept == [] and narrowed == []
         ((text, problems, by),) = rejected(ws)
         assert (text, by) == (ORIGINAL, "code")
         assert problems[0].startswith(f'The Reviewer narrowed it to "{cut}"') and why in problems[0]
-        assert summary["checked"]["producer"] == {"kept": 0, "narrowed": 0, "rejected": 1}
+        assert summary["checked"]["producer"] == {"kept": 0, "narrowed": 0, "proposed": 0, "rejected": 1}
+
+
+# --- Who checks a line, and lines that loosen a habit -------------------------------------------
+
+# Kept in golden16 when the Reviewer checked its own lesson.
+REVIEWER_L2 = ("Prefer saving fixes for real product or avoid-list issues and keep the same "
+               "check pattern")
+CHECKED = "published; review checked: the claim matches the product page"
+CLAIMS = "Check each claim against the product page before a pass."
+HOOKS = "Check the hook length before each video."
+
+
+def proposals(ws):
+    return [e.payload for e in ws.events.list("memory.proposed")
+            if e.payload.get("kind") == "loosening"]
+
+
+def test_no_role_checks_its_own_lines():
+    for store, role in [(mem.ACCOUNT, None), *((mem.LESSONS, r) for r in mem.ROLES)]:
+        assert passes.checker_for(store, role) != passes.author_of(store, role)
+    ws = workspace()
+    r1, _ = entry(ws, "reviewer", 2, "passed", topic="week1/creative/w1-t1",
+                  kind="CreativeReview", detail=CHECKED)
+    r2, _ = entry(ws, "reviewer", 4, "passed", topic="week1/creative/w1-t2",
+                  kind="CreativeReview", detail=CHECKED)
+    p1, _ = entry(ws, "producer", 2, "passed", topic="week1/creative/w1-t1", detail=CHECKED)
+    p2, _ = entry(ws, "producer", 4, "passed", topic="week1/creative/w1-t2", detail=CHECKED)
+    seen = []
+
+    def responder(body):
+        name, inputs = output_name(body), prompt_inputs(body)
+        if name == "MemoryPass" and "your_journal" in inputs:
+            mine = r1 in {e["id"] for e in inputs["your_journal"]}
+            text, sources = (CLAIMS, [r1, r2]) if mine else (HOOKS, [p1, p2])
+            return MemoryPass(drop=[], lines=[MemoryLineDraft(id="new", text=text,
+                                                              sources=sources)], summary="s")
+        if name == "MemoryCheck":
+            title = "Analyst" if "You are the Analyst" in json.dumps(body) else "Reviewer"
+            seen.append((title, sorted({x["role"] for x in inputs["lines"]})))
+            return verdicts(inputs)
+        return offline_responder(body)
+
+    close(ws, offline_model(responder=responder)[0], 1)
+    assert sorted(seen) == [("Analyst", ["reviewer"]), ("Reviewer", ["producer"])]
+    roles = {e.payload["topic"]: e.payload["role"] for e in ws.events.list("model.call")
+             if "/memory/check" in e.payload["topic"]}
+    assert roles == {"week1/memory/check": "reviewer", "week1/memory/check/analyst": "analyst"}
+    assert [x.text for x in mem.view(ws, mem.LESSONS, "reviewer").lines] == [CLAIMS]
+    # And code refuses a self-check outright, whoever asks for one.
+    scope = Scope(ws, CostMeter(ws.events), "x", 1, memory=False)
+    mine = {"line_id": "reviewer:l1", "store": "lessons", "role": "reviewer", "text": "t",
+            "status": "active", "sources": {}, "evidence": {}}
+    account = {**mine, "line_id": "account:a1", "store": "account", "role": "team"}
+    for checker, line in (("reviewer", mine), ("growth_lead", account)):
+        with pytest.raises(passes.SelfCheckError, match="checks its own"):
+            asyncio.run(passes.run_memory_check(scope, model_with(), ws.facts.current(),
+                                                ws.facts.version, 1, [line], checker))
+
+
+def test_a_line_the_check_labels_loosen_waits_for_the_owner():
+    ws = workspace()
+    j1, _ = entry(ws, "producer", 2, "passed", topic="week1/creative/w1-t1", detail=CHECKED)
+    j2, _ = entry(ws, "producer", 4, "passed", topic="week1/creative/w1-t2", detail=CHECKED)
+    text = "Prefer one review round for repeat creatives that passed before."
+    assert sg.looser(text) is None  # only the label catches it
+    summary = close(ws, model_with(lessons=lines((text, [j1, j2])), check=lambda inputs: verdicts(
+        inputs, direction="loosen", direction_reason="asks for fewer review rounds")), 1)
+    assert mem.view(ws, mem.LESSONS, "producer").lines == []
+    (p,) = proposals(ws)
+    assert (p["text"], p["by"], p["new"], p["sources"]) == (text, "producer", True, [j1, j2])
+    assert p["flags"] == [{"by": "reviewer", "why": "asks for fewer review rounds"}]
+    assert summary["checked"]["producer"] == {"kept": 0, "narrowed": 0, "proposed": 1,
+                                              "rejected": 0}
+    assert summary["proposed"] == 1
+
+
+@pytest.mark.parametrize("store, role, text, words", [
+    (mem.LESSONS, "reviewer", REVIEWER_L2, "saving fixes"),
+    (mem.LESSONS, "media_buyer", "Scale winners earlier once cost per result is under target.",
+     "earlier"),
+    (mem.LESSONS, "analyst", "No need to recheck numbers the readout already gives.", "No need"),
+    (mem.ACCOUNT, None, "Skip the second hook test when the first one beat target.", "Skip"),
+])
+def test_code_sends_a_loosening_line_to_the_owner_when_the_check_misses_it(store, role, text,
+                                                                         words):
+    ws = workspace()
+    if store == mem.ACCOUNT:
+        freeze_week(ws, 1)
+        model = model_with(account=lambda inputs: MemoryPass(drop=[], lines=[
+            MemoryLineDraft(id="new", text=text, sources=["wk-1"])], summary="s"),
+                           check=lambda inputs: verdicts(inputs, direction="neutral"))
+    else:
+        j1, _ = entry(ws, role, 2, "passed", topic="week1/creative/w1-t1", detail=CHECKED)
+        j2, _ = entry(ws, role, 4, "passed", topic="week1/creative/w1-t2", detail=CHECKED)
+        model = model_with(lessons=lines((text, [j1, j2])),
+                           check=lambda inputs: verdicts(inputs, direction="neutral"))
+    summary = close(ws, model, 1)
+    assert text not in [x.text for x in mem.view(ws, store, role).lines]
+    (p,) = proposals(ws)
+    assert p["text"] == text and p["flags"] == [{"by": "code", "why": f'it says "{words}"'}]
+    assert p["checker"] == ("analyst" if role == "reviewer" else "reviewer")
+    assert summary["checked"]["account" if role is None else role]["proposed"] == 1
+
+
+def test_only_scale_when_is_a_condition_not_a_loosening():
+    ws = workspace()
+    j1, _ = entry(ws, "media_buyer", 2, "passed", detail="cost per result 9 vs target 16")
+    j2, _ = entry(ws, "media_buyer", 4, "passed", detail="cost per result 10 vs target 16")
+    text = "Only scale when results reach 30 and cost per result is under target."
+    assert sg.looser(text) is None
+    close(ws, model_with(lessons=lines((text, [j1, j2])),
+                         check=lambda inputs: verdicts(inputs, direction="tighten")), 1)
+    assert [x.text for x in mem.view(ws, mem.LESSONS, "media_buyer").lines] == [text]
+    assert proposals(ws) == []
+
+
+def test_the_owner_approves_or_declines_a_loosening_line():
+    ws = workspace()
+    j1, _ = entry(ws, "media_buyer", 2, "passed", detail="cost per result 9 vs target 16")
+    j2, _ = entry(ws, "media_buyer", 4, "passed", detail="cost per result 10 vs target 16")
+    approve = "Scale winners earlier once cost per result is under target."
+    decline = "Skip the second look at a change set when the last two were approved."
+    close(ws, model_with(lessons=lines((approve, [j1, j2]), (decline, [j1, j2]))), 1)
+    assert mem.view(ws, mem.LESSONS, "media_buyer").lines == []
+    asked = {p.payload["text"]: p.id for p in mem.open_proposals(ws)}
+    assert set(asked) == {approve, decline}
+    mem.resolve_proposal(ws, asked[approve], True, 1)
+    mem.resolve_proposal(ws, asked[decline], False, 1)
+    (line,) = mem.view(ws, mem.LESSONS, "media_buyer").lines
+    assert (line.text, line.author, line.locked, line.status) == (approve, "owner", True, "active")
+    assert line.sources[:2] == [j1, j2] and line.sources[-1].startswith("e-")
+    (shown,) = mem.slice_for(ws, "media_buyer", day=8).lessons
+    assert shown.text.startswith(f"[owner] {approve}")
+    decisions = [(e.actor, e.payload["proposal_id"], e.payload["accepted"])
+                 for e in ws.events.list("memory.proposal_resolved")]
+    assert decisions == [("user", asked[approve], True), ("user", asked[decline], False)]
+    assert mem.open_proposals(ws) == []
+    with pytest.raises(ValueError, match="Already resolved"):
+        mem.resolve_proposal(ws, asked[approve], False)
+    # Next week the approved line stays, and the declined one cannot come back on its own.
+    j3, _ = entry(ws, "media_buyer", 9, "passed", detail="cost per result 9 vs target 16")
+    j4, _ = entry(ws, "media_buyer", 11, "passed", detail="cost per result 10 vs target 16")
+    close(ws, model_with(lessons=lines((decline, [j3, j4]))), 2)
+    assert [x.text for x in mem.view(ws, mem.LESSONS, "media_buyer").lines] == [approve]
+    ((text, problems, by),) = rejected(ws)
+    assert (text, by) == (decline, "code") and "the owner declined it" in problems[0]
+    assert len(proposals(ws)) == 2
+
+
+def test_a_line_waiting_for_the_owner_is_not_asked_again():
+    ws = workspace()
+    text = "Scale winners earlier once cost per result is under target."
+    for week, days in ((1, (2, 4)), (2, (9, 11))):
+        j1, _ = entry(ws, "media_buyer", days[0], "passed", detail="cost per result 9 vs 16")
+        j2, _ = entry(ws, "media_buyer", days[1], "passed", detail="cost per result 10 vs 16")
+        summary = close(ws, model_with(lessons=lines((text, [j1, j2]))), week)
+        assert summary["checked"]["media_buyer"]["proposed"] == 1
+    assert len(mem.open_proposals(ws)) == 1
 
 
 # --- What journal entries and outcomes record ---------------------------------------------------

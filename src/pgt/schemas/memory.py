@@ -30,10 +30,14 @@ class LineVerdict(_Out):
     verdict: Literal["keep", "narrow", "reject"]
     reason: str  # why not, in one sentence; empty on keep
     narrowed: str  # on narrow: the line cut down to what the sources support; empty otherwise
+    # Whether following the line makes the team's checks, gates or habits stricter or looser.
+    direction: Literal["tighten", "loosen", "neutral"]
+    direction_reason: str  # why, in a few words
 
 
 class MemoryCheck(_Out):
-    """The Reviewer's check of new memory lines against the charter and their sources."""
+    """A check of new memory lines against the charter and their sources, by a role other than
+    the one that wrote them (the Reviewer; the Analyst for the Reviewer's own lessons)."""
 
     verdicts: list[LineVerdict]
 

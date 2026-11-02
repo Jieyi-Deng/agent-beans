@@ -317,3 +317,76 @@ def test_repairs_stay_narrow():
     (call,), rest = tool_calls_in_text(LEAKED, {"final_result": {
         "properties": {"findings": {"type": "array"}, "note_to_self": {"type": "string"}}}})
     assert call.args == {"findings": [], "note_to_self": ""} and rest == ""
+
+
+# --- Answers in prose: a teammate's question, and the owner's ----------------------------------
+
+PROSE = ("The evidence has no data for w1-t3, so the closest is test_1 at a cost per result of "
+         "10.12 [ev-d7-test_1-readout], and ad_1 [ev-w1-ad_1-week].")
+
+
+def test_an_answer_written_as_prose_after_a_lookup_is_handed_in_without_a_retry():
+    """Seen live in golden16: the Analyst used recall_journal, then wrote its answer to the
+    Producer as plain sentences, and each such answer failed schema once before a retry."""
+    from pgt.harness.creative_checks import check_answer
+    from pgt.roles.analyst import run_answer
+
+    ws = Workspace()
+    facts = fitness_app_facts()
+    ws.facts.set(facts, "user")
+    evidence = [Evidence(evidence_id="ev-d7-test_1-readout", kind="derived",
+                         values={"cost_per_result": 10.12, "results": 13}),
+                Evidence(evidence_id="ev-w1-ad_1-week", kind="derived", values={"ctr": 0.0171})]
+    for e in evidence:
+        ws.ledger.add(e)
+    fake = BasetenFake(text_answer=PROSE, lookups=[{"subject": "w1-t3"}])
+    scope = Scope(ws, CostMeter(ws.events), "weekly-w1", 7)
+    out = asyncio.run(run_answer(scope, chat_model(fake.client()), facts, ws.facts.version,
+                                 "What data supports w1-t3?", evidence))
+    assert out.answer == PROSE
+    assert out.evidence_ids == ["ev-d7-test_1-readout", "ev-w1-ad_1-week"]
+    assert check_answer(out, ws.ledger) == []
+    calls = [e.payload for e in ws.events.list("model.call")]
+    assert [c["failure"] for c in calls] == [None, None] and len(fake.bodies) == 2
+    assert calls[-1]["repaired"] == ["answer_in_text"]
+    assert "Hand it in with final_result: answer is" in json.dumps(fake.bodies[0])
+
+
+def test_the_answer_repair_stays_narrow():
+    from pydantic_ai.messages import ModelResponse, TextPart
+
+    from pgt.llm.repair import answer_in_text
+
+    answer = {"properties": {"answer": {}, "evidence_ids": {}, "note_to_self": {}}}
+    other = {"properties": {"findings": {}, "note_to_self": {}}}
+    prose = ModelResponse(parts=[TextPart(PROSE)])
+    assert answer_in_text(prose, {"final_result": answer}).args["answer"] == PROSE
+    assert answer_in_text(prose, {"final_result": other}) is None  # not an Answer
+    assert answer_in_text(prose, {}) is None  # no output tool offered
+    for text in ('{"answer": "x"', "```json\n{}", "", "<x:invoke"):
+        assert answer_in_text(ModelResponse(parts=[TextPart(text)]),
+                              {"final_result": answer}) is None
+
+
+def test_an_owner_question_in_the_team_room_gets_the_growth_leads_answer():
+    """The owner's note with no @role goes to the Growth Lead, who answers in the thread."""
+    from pgt.harness import memory as mem
+    from pgt.loops.notes import route_message, triage_notes
+    from pgt.schemas import NoteTriage
+
+    ws = Workspace()
+    ws.facts.set(fitness_app_facts(), "user")
+    posted = ws.events.append("message.posted", "user",
+                              {"text": "Why did cost per result rise this week?", "to": None,
+                               "thread": None}, sim_day=3)
+    assert route_message(ws, posted, None, None) == "growth_lead"
+    reply = NoteTriage(action="answer", to="growth_lead", reason="A question about the week.",
+                       answer="It rose on the newest ad set while it is still learning.")
+    fake = BasetenFake(json_answer=reply.model_dump_json())
+    (done,) = asyncio.run(triage_notes(ws, chat_model(fake.client()), CostMeter(ws.events), 3))
+    assert done["action"] == "answer"
+    (answer,) = [e for e in ws.events.list("message.posted") if e.actor == "growth_lead"]
+    assert answer.payload == {"text": reply.answer, "to": None, "thread": posted.id}
+    assert [e.payload["failure"] for e in ws.events.list("model.call")] == [None]
+    assert "response_format" in fake.bodies[0]  # no tools, so the strict schema is enforced
+    assert any(n["done"] for n in mem.notes(ws))

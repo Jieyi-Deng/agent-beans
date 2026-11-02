@@ -1,5 +1,6 @@
 """Harness and Memory endpoints: what each call cost and saw, and the team's memory, which the
-owner can edit. Owner edits win and lock the line; a role can only propose a change to it."""
+owner can edit. Owner edits win and lock the line; a role can only propose a change to it. A
+line that would loosen a check, gate or habit also waits here until the owner approves it."""
 
 from __future__ import annotations
 
@@ -54,6 +55,10 @@ def memory_state(ws) -> dict:
         view = mem.view(ws, mem.LESSONS, role, reader="owner")
         lessons[role] = {**_lines(view), "history": _history(ws, mem.LESSONS, role)}
     proposals = [{"id": e.id, "ts": e.ts, **e.payload} for e in mem.open_proposals(ws)]
+    asked = {e.id: e.payload for e in ws.events.list("memory.proposed")}
+    decided = [{"id": e.payload["proposal_id"], "ts": e.ts, "accepted": e.payload["accepted"],
+                **asked.get(e.payload["proposal_id"], {})}
+               for e in ws.events.list("memory.proposal_resolved")][-40:]
     return {
         "account": {**_lines(mem.view(ws, mem.ACCOUNT)),
                     "history": _history(ws, mem.ACCOUNT, None)},
@@ -63,6 +68,7 @@ def memory_state(ws) -> dict:
         "closed": sorted(closed_weeks(ws)),
         "notes": mem.notes(ws),
         "proposals": proposals,
+        "decided": decided,
         "fact_proposals": _fact_proposals(ws),
         "charter": ws.facts.current().model_dump(mode="json") if ws.facts.version else None,
         "charter_version": ws.facts.version,
@@ -152,8 +158,9 @@ def add_memory_routes(app: FastAPI, team, refresh) -> None:
     @app.post("/api/memory/proposals/{proposal_id}")
     async def decide_memory(proposal_id: int, body: Decision):
         busy()
+        week = mem.week_of(team.account.day) if team.account else None
         try:
-            mem.resolve_proposal(team.ws, proposal_id, body.accept)
+            mem.resolve_proposal(team.ws, proposal_id, body.accept, week)
         except LookupError as exc:
             raise HTTPException(404, str(exc)) from exc
         except ValueError as exc:

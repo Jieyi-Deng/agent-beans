@@ -173,8 +173,13 @@ def verdict_only(ws, source: str) -> bool:
 
 WIDER = re.compile(r"\b(always|all|every|any|anything|everything|whenever|regardless|more|most|"
                    r"each)\b", IC)
-CONDITION = re.compile(r"\b(when|if|until|unless|while|only|after|before|once|as long as)\b"
-                       r"([^,.;]*)", IC)
+# A condition runs to the end of its sentence, through a list ("when product match, legibility
+# and story stay clean"), and stops at a comma that starts the next instruction.
+CONDITION = re.compile(
+    r"\b(when|if|until|unless|while|only|after|before|once|as long as)\b([^.;]*?)"
+    r"(?=[.;]|,\s*(?:and\s+|then\s+|but\s+|so\s+)?(?:prefer|keep|avoid|check|hold|wait|use|"
+    r"ask|send|flag|note|move|scale|pass|cut|drop|add|try|skip|save|stop|start|let|give|write|"
+    r"make|put|run)\b|$)", IC)
 NUMBER = re.compile(r"\d+(?:\.\d+)?")
 FREE_WORDS = {
     "prefer", "keep", "avoid", "check", "hold", "wait", "with", "from", "that", "this", "these",
@@ -225,6 +230,47 @@ def narrower_problem(original: str, narrowed: str, sources_text: str) -> str | N
     if (new_numbers := sorted(set(NUMBER.findall(narrowed)) - numbers)):
         return f"the rewrite adds the number {new_numbers[0]}, which its sources do not give"
     return None
+
+
+# --- A line that loosens a check, gate or habit --------------------------------------------------
+
+# Wording that makes the team's own work less strict. A line inside the house rules may still
+# loosen a habit; code sends it to the owner rather than keeping it. "only" is not here: "only
+# scale when results reach 30" tightens; nor are "or fewer" and "fewer than", which set a limit.
+LOOSER = re.compile(
+    r"\b(skip|skips|skipping|skipped|(?<!\bor )fewer(?! than)|loosen\w*|relax\w*|lenient|"
+    r"ignor\w*|bypass\w*|waive\w*|earlier|sooner|wider|widen\w*|broader|broaden\w*|"
+    r"no need|not needed|needn'?t|unnecessary|no longer|"
+    r"less (strict|often|care|careful|checking|review|scrutiny|caution|cautious)|"
+    r"lower (the )?bar|"
+    r"(raise|raising|lift|lifting|increase|increasing|higher|bigger|larger)\s+(the\s+)?"
+    r"(cap|limit|ceiling|threshold|max|maximum)s?|"
+    r"(lower|lowering|reduce|reducing)\s+(the\s+)?(threshold|minimum|floor|requirement)s?|"
+    r"(drop|dropping|remove|removing|stop|stopping|cut|cutting|reduce|reducing|limit|limiting|"
+    r"save|saving|reserve|reserving)\s+(the\s+|a\s+|extra\s+|second\s+)*"
+    r"(check|checks|checking|review|reviews|step|steps|fix|fixes|redo|redos|send-?backs?)|"
+    r"without (a |the |any )?(check|review|second look|approval|sign-?off))\b", IC)
+
+
+def looser(text: str) -> str | None:
+    """The words that make this line loosen a check, gate or habit, or None."""
+    m = LOOSER.search(text)
+    return m.group(0) if m else None
+
+
+def declined(ws, store: str, role: str | None) -> dict[str, int]:
+    """Lines the owner declined from Proposals: normalized text -> the week it was proposed.
+    A role may not propose the same line again; the owner can still write it."""
+    role = None if store == mem.ACCOUNT else role
+    proposals = {e.id: e.payload for e in ws.events.list("memory.proposed")}
+    found = {}
+    for event in ws.events.list("memory.proposal_resolved"):
+        p = proposals.get(event.payload.get("proposal_id"), {})
+        if event.payload.get("accepted") or p.get("kind") != "loosening" or \
+                p.get("store") != store or p.get("role") != role:
+            continue
+        found[_norm(p["text"])] = p.get("week") or 0
+    return found
 
 
 def topic_kind(topic: str | None) -> str:
