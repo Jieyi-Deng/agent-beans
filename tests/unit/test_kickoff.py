@@ -26,8 +26,8 @@ def test_the_sandbox_is_named_as_synthetic_and_counts_campaigns():
     from pgt.sandbox import SandboxAccount, fitness_app_scenario
 
     account = SandboxAccount(fitness_app_scenario())
-    text = kickoff_text("Pallas Fit sandbox", account.state(), account.drafts(), None, None, False)
-    assert text.startswith("I read Pallas Fit sandbox, a synthetic account. Nothing was changed.")
+    text = kickoff_text("Beans' Active sandbox", account.state(), account.drafts(), None, None, False)
+    assert text.startswith("I read Beans' Active sandbox, a synthetic account. Nothing was changed.")
     assert "Live: 2 campaigns with 5 ads, nothing spent yet." in text
     assert ("1 campaign, 1 ad set and 3 ads (New Year resolutions, Testimonial v2)" in text)
     assert text.endswith("what needs your decision.")

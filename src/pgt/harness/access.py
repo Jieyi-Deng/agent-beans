@@ -35,7 +35,7 @@ LEVELS = [
 ]
 
 SANDBOX = {
-    "kind": "sandbox", "account_id": "act_sandbox_0001", "name": "Pallas Fit sandbox",
+    "kind": "sandbox", "account_id": "act_sandbox_0001", "name": "Beans' Active sandbox",
     "currency": "USD", "timezone": "America/New_York",
 }
 

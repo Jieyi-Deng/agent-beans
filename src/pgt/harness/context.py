@@ -37,7 +37,7 @@ Team rules:
 - Policy is checked by code after you answer. Propose what the evidence supports; do not try to
   work around house rules.
 - Return only the requested deliverable."""
-# PGT answers carry a note_to_self field; the bench arms share TEAM_RULES but not this.
+# Agent Beans answers carry a note_to_self field; the bench arms share TEAM_RULES but not this.
 NOTE_RULE = ("- note_to_self is at most two short lines for next time: never your working, and "
              "never the deliverable itself.")
 

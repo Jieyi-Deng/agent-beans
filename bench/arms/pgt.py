@@ -1,4 +1,4 @@
-"""Arm A: the Pallas Growth Team as built, and five ablations that each switch off one part of
+"""Arm A: Agent Beans as built, and five ablations that each switch off one part of
 the harness. An ablation is a patch over the real code, so everything else stays the same."""
 
 from __future__ import annotations

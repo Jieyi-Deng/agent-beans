@@ -1,8 +1,8 @@
 # Meta models and products
 
-PGT is built on Meta's stack end to end: Muse models think, write and review; Muse Image and SAM 3.1 make the ads; the Meta Ads MCP server and the Marketing API connect the team to a real ad account. This page shows which part runs where, why, and what it cost on a recorded live run.
+Agent Beans is built on Meta's stack end to end: Muse models think, write and review; Muse Image and SAM 3.1 make the ads; the Meta Ads MCP server and the Marketing API connect the team to a real ad account. This page shows which part runs where, why, and what it cost on a recorded live run.
 
-## What PGT uses
+## What Agent Beans uses
 
 | Meta product | Used for | Code |
 | --- | --- | --- |

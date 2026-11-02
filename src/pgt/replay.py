@@ -30,7 +30,7 @@ UNSAFE = re.compile(
     r"|\bact_(?!sandbox_)\d+"
 )
 READ_ONLY = ("This is a recorded replay of a live run, so nothing changes here. "
-             "Run PGT locally to connect an account.")
+             "Run Agent Beans locally to connect an account.")
 
 Get = Callable[[str], bytes]
 

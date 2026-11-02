@@ -238,9 +238,9 @@ def test_upload_accepts_images_only(client):
 
 def test_seeded_history_starts_connected_and_reconnects_with_a_level_and_rules(client):
     a = client.get("/api/access").json()
-    assert a["connection"]["name"] == "Pallas Fit sandbox" and a["level"] == 2
+    assert a["connection"]["name"] == "Beans' Active sandbox" and a["level"] == 2
     assert client.get("/api/room").json()["items"][0]["label"].startswith(
-        "Connected Pallas Fit sandbox")
+        "Connected Beans' Active sandbox")
     assert a["meta_login"]  # no Meta app configured in tests
     r = client.post("/api/access/connect",
                     json={"kind": "sandbox", "level": 1, "rules": {"daily_budget_cap": 80}})
@@ -252,7 +252,7 @@ def test_seeded_history_starts_connected_and_reconnects_with_a_level_and_rules(c
     items = client.get("/api/room").json()["items"]
     texts = [i["text"] for i in items if i["kind"] == "msg"]
     lines = [i["label"] for i in items if i["kind"] == "day"]
-    assert lines[-1].startswith("Connected Pallas Fit sandbox (act_sandbox_0001)") and lines[-1].endswith("L1 Propose")
+    assert lines[-1].startswith("Connected Beans' Active sandbox (act_sandbox_0001)") and lines[-1].endswith("L1 Propose")
     assert not any(t.startswith("Set the team to") for t in texts)  # said in the line above
     assert any(t.startswith("Changed house rules (daily budget cap from $") and "to $80)" in t
                for t in texts)
@@ -392,7 +392,7 @@ def test_a_cold_team_starts_with_an_empty_room_and_reads_the_sandbox_on_connect(
         room = c.get("/api/room").json()["items"]
         assert [i["kind"] for i in room] == ["day", "msg"]  # setup rules are not a change
         assert room[1]["who"]["actor"] == "growth_lead"
-        assert room[1]["text"].startswith("I read Pallas Fit sandbox, a synthetic account.")
+        assert room[1]["text"].startswith("I read Beans' Active sandbox, a synthetic account.")
         assert team.ws.facts.current().house_rules.daily_budget_cap == 80
         d = c.get("/api/drafts").json()
         assert d["available"] and d["counts"] == {"campaign": 1, "ad set": 1, "ad": 3}
@@ -409,7 +409,7 @@ def test_the_seeded_sandbox_shows_its_drafts_without_a_kickoff(client):
     client.post("/api/access/connect", json={"kind": "sandbox", "level": 1})
     _idle(client)
     texts = [i.get("text", "") for i in client.get("/api/room").json()["items"]]
-    assert not any(t.startswith("I read Pallas Fit sandbox") for t in texts)
+    assert not any(t.startswith("I read Beans' Active sandbox") for t in texts)
 
 def test_the_page_is_never_cached_but_assets_are_served(tmp_path):
     dist = tmp_path / "dist"

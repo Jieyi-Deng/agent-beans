@@ -1,6 +1,6 @@
 """Facebook Login for Business, for a local install only.
 
-The owner signs in on facebook.com, picks the ad account and grants access there. PGT never sees
+The owner signs in on facebook.com, picks the ad account and grants access there. Agent Beans never sees
 a password; it gets a one-time code back on its own callback URL, checks the `state` it sent, and
 swaps the code for a token. The token stays in memory and is never written to the workspace.
 
@@ -32,7 +32,7 @@ def unavailable(public: bool) -> str | None:
     """Why the real login cannot run here, or None when it can."""
     if public:
         return ("The public demo runs on the sandbox account only. Connecting a real ad account "
-                "works when you run PGT on your own machine.")
+                "works when you run Agent Beans on your own machine.")
     if settings() is None:
         return ("Set META_APP_ID, META_APP_SECRET and META_LOGIN_CONFIG_ID for your Meta app to "
                 "turn this on.")

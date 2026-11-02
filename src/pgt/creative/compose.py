@@ -240,7 +240,7 @@ def product_box(image: Image.Image, threshold: int = 40) -> Box:
 
 
 def make_demo_product_shot(size: int = 1600) -> tuple[Image.Image, Box]:
-    """Draw a synthetic Pallas Fit phone on a plain product-shot background."""
+    """Draw a synthetic Beans' Active phone on a plain product-shot background."""
     if size < 32:
         raise ValueError("Product shot size must be at least 32 pixels")
     image = Image.new("RGB", (size, size), (242, 240, 234))
@@ -301,8 +301,8 @@ def make_demo_product_shot(size: int = 1600) -> tuple[Image.Image, Box]:
     )
     left = x1 + round(width * 0.12)
     draw.text(
-        (left, y1 + round(height * 0.12)), "Pallas Fit",
-        font=ImageFont.load_default(size=max(1, round(width * 0.12))), fill=(25, 64, 54),
+        (left, y1 + round(height * 0.12)), "Beans' Active",
+        font=ImageFont.load_default(size=max(1, round(width * 0.09))), fill=(25, 64, 54),
     )
     draw.text(
         (left, y1 + round(height * 0.23)), "Day 12 streak",

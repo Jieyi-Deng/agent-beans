@@ -1,10 +1,10 @@
-# Pallas Growth Team
+# Agent Beans
 
 An always-on AI growth team for Meta ads, built on Meta's Muse models for the Meta Global AI Developer Hackathon (Indie developer track).
 
-PGT checks your ad account every day, plans and makes new ads every week, and never changes anything without your approval. Every number it shows traces back to the source data.
+Agent Beans checks your ad account every day, plans and makes new ads every week, and never changes anything without your approval. Every number it shows traces back to the source data.
 
-**Live demo:** [pallas-ads.github.io/pallas-growth](https://pallas-ads.github.io/pallas-growth/), the project homepage with read-only recordings of two live runs on synthetic sandbox accounts: Northpaw Supply, a pet-supplies store (14 daily checks and one weekly review with three new ads, $1.14 of model calls), and Pallas Fit, a fitness app with no ad history ($0.96).
+**Live demo:** [pallas-ads.github.io/pallas-growth](https://pallas-ads.github.io/pallas-growth/), the project homepage with read-only recordings of two live runs on synthetic sandbox accounts: Northpaw Supply, a pet-supplies store (14 daily checks and one weekly review with three new ads, $1.14 of model calls), and Beans' Active, a fitness app with no ad history ($0.96).
 
 ## How it works
 
@@ -17,7 +17,7 @@ Around the roles sits a harness that enforces in code what prompts can only ask 
 | [Architecture](docs/architecture.md) | System overview, the team, the daily and weekly loops, the data model, real ad accounts, the public replay |
 | [The harness](docs/harness.md) | Each guarantee, how it works, where it lives, and the test that proves it |
 | [Meta models and products](docs/meta-models.md) | Which Meta model or product runs each part, the cost of a live run, and why Meta's models matter here |
-| [Framework comparison](docs/HARNESS_COMPARISON.md) | PGT against a single agent, an OpenAI Agents SDK team and a LangGraph team |
+| [Framework comparison](docs/HARNESS_COMPARISON.md) | Agent Beans against a single agent, an OpenAI Agents SDK team and a LangGraph team |
 | [Bench results](docs/BENCH_RESULTS.md), [live results](docs/LIVE_RESULTS.md) | Full tables from the offline and live runs |
 
 ## Run it

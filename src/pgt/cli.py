@@ -11,7 +11,7 @@ pgt usage --db path [--loop daily-d3]      calls, cached share, cost and trims p
 
 replay records a running team as the static, read-only site that GitHub Pages serves.
 
---template picks the synthetic business in the sandbox: "app" is Pallas Fit, a fitness app;
+--template picks the synthetic business in the sandbox: "app" is Beans' Active, a fitness app;
 "ecommerce" is Northpaw Supply, an online pet store with two weeks of history.
 
 Live runs default to --provider mixed: every role runs on Muse Spark Open (open weights) on
@@ -31,7 +31,7 @@ from pgt.harness.workspace import Workspace
 
 def main(argv: list[str] | None = None) -> None:
     os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
-    parser = argparse.ArgumentParser(prog="pgt", description="Pallas Growth Team")
+    parser = argparse.ArgumentParser(prog="pgt", description="Agent Beans")
     sub = parser.add_subparsers(dest="command", required=True)
     sim = sub.add_parser("simulate", help="Run the daily check over simulated days")
     sim.add_argument("--days", type=int, default=7)

@@ -1,4 +1,4 @@
-"""A small Graph API client for the Marketing API calls PGT makes.
+"""A small Graph API client for the Marketing API calls Agent Beans makes.
 
 The transport is injectable so tests run against a fake Graph and never reach the network.
 Errors carry Meta's message but never the access token.

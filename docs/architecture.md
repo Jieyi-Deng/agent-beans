@@ -1,13 +1,13 @@
 # Architecture
 
-Pallas Growth Team (PGT) is a small team of AI roles that runs Meta ads for one advertiser. The roles are language-model agents. Everything that decides whether their work is safe to use is ordinary code: the numbers they may quote, the tools they may call, the house rules a budget change must pass, the approval a write needs, and the money a run may spend.
+Agent Beans (Agent Beans) is a small team of AI roles that runs Meta ads for one advertiser. The roles are language-model agents. Everything that decides whether their work is safe to use is ordinary code: the numbers they may quote, the tools they may call, the house rules a budget change must pass, the approval a write needs, and the money a run may spend.
 
 This page shows how the pieces fit. Two companion pages go deeper:
 
 - [harness.md](harness.md): the guarantees the harness enforces, where each one lives in code, and the tests and bench scenarios that prove it.
 - [meta-models.md](meta-models.md): which Meta model each role runs on and why, the creative image pipeline, and the Meta ads integration.
 
-Measured results are in [BENCH_RESULTS.md](BENCH_RESULTS.md) (offline, 9 arms), [LIVE_RESULTS.md](LIVE_RESULTS.md) (live, on Muse) and [HARNESS_COMPARISON.md](HARNESS_COMPARISON.md) (PGT against the OpenAI Agents SDK, LangGraph and a single agent).
+Measured results are in [BENCH_RESULTS.md](BENCH_RESULTS.md) (offline, 9 arms), [LIVE_RESULTS.md](LIVE_RESULTS.md) (live, on Muse) and [HARNESS_COMPARISON.md](HARNESS_COMPARISON.md) (Agent Beans against the OpenAI Agents SDK, LangGraph and a single agent).
 
 ## System overview
 
@@ -16,7 +16,7 @@ flowchart TB
     owner(["Owner"]) --> web["Web app (React + Vite)<br/>Team Room, Deliverables, Dashboard,<br/>Creative Assets, Settings"]
     web <--> api
 
-    subgraph server["PGT server (FastAPI)"]
+    subgraph server["Agent Beans server (FastAPI)"]
         direction TB
         api["REST API + SSE event stream"] --> loops["Loops<br/>daily check, weekly review, refresh"]
         loops --> roles["Roles<br/>Growth Lead, Analyst, Media Buyer,<br/>Strategist, Producer, Reviewer"]
@@ -270,7 +270,7 @@ The API checks the level before it accepts an approval, and the Operator checks 
 
 ## The public replay
 
-The public site is a homepage plus two recordings of real live runs, served as static files: Northpaw Supply, a pet-supplies store (`--template ecommerce`), and Pallas Fit, a fitness app starting cold (`--template app --cold`). It calls no model and holds no key.
+The public site is a homepage plus two recordings of real live runs, served as static files: Northpaw Supply, a pet-supplies store (`--template ecommerce`), and Beans' Active, a fitness app starting cold (`--template app --cold`). It calls no model and holds no key.
 
 ```mermaid
 flowchart TB
@@ -291,4 +291,4 @@ The replay build of the web app maps each API path to a JSON file (`/api/dashboa
 - `uv run pytest`: 200 tests. Unit tests cover each harness component; acceptance tests run whole daily and weekly loops on the offline model; API tests drive the FastAPI app and the replay export.
 - The offline model (`pgt.llm.offline`) is deterministic and can plant specific mistakes (a wrong number, an unsupported claim, an injected instruction), so the tests prove the harness catches them rather than hoping the model avoids them.
 - The Meta Ads MCP, the Graph API and both model providers are behind injectable transports, so no test touches the network.
-- `bench/` runs the same scenarios against PGT, five ablations, a single agent, an OpenAI Agents SDK team and a LangGraph team. See [BENCH_RESULTS.md](BENCH_RESULTS.md).
+- `bench/` runs the same scenarios against Agent Beans, five ablations, a single agent, an OpenAI Agents SDK team and a LangGraph team. See [BENCH_RESULTS.md](BENCH_RESULTS.md).
