@@ -68,6 +68,8 @@ def memory_state(ws) -> dict:
         "charter_version": ws.facts.version,
         "rejected": [{"id": e.id, "ts": e.ts, **e.payload}
                      for e in ws.events.list("memory.rejected")][-40:],
+        "narrowed": [{"id": e.id, "ts": e.ts, **e.payload}
+                     for e in ws.events.list("memory.narrowed")][-40:],
         "reverted": [{"id": e.id, "ts": e.ts, **e.payload}
                      for e in ws.events.list("memory.reverted")],
         "collapse": [{"id": e.id, **e.payload} for e in ws.events.list("memory.collapse")],

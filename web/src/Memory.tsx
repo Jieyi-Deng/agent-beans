@@ -122,6 +122,9 @@ function storeNotes(m: MemoryData, kind: "account" | "lessons", role: string | n
   const rejected = m.rejected.filter((r) => r.week === week && r.store === kind && (kind === "account" || r.role === role));
   if (rejected.length)
     out.push(`Week ${week}: ${rejected.length} proposed line${rejected.length === 1 ? " was" : "s were"} not kept. See Checks for why.`);
+  const narrowed = (m.narrowed ?? []).filter((r) => r.week === week && r.store === kind && (kind === "account" || r.role === role));
+  if (narrowed.length)
+    out.push(`Week ${week}: ${narrowed.length} line${narrowed.length === 1 ? " was" : "s were"} kept in a narrower form than proposed. See Checks.`);
   return out;
 }
 
@@ -298,12 +301,13 @@ function FactRow({ f, buttons }: { f: FactProposal; buttons: ReactNode }) {
 
 function Checks({ m }: { m: MemoryData }) {
   const rejected = [...m.rejected].reverse();
+  const narrowed = [...(m.narrowed ?? [])].reverse();
   return (
     <div className="col" style={{ gap: 16 }}>
       <section className="section">
         <div className="h2">Lines not kept</div>
         <div className="muted" style={{ fontSize: 12.5 }}>
-          Every proposed line is checked in code (sources exist and belong to the role, enough outcomes behind it, nothing that loosens a rule or reads like an instruction), then by the Reviewer.
+          Every proposed line is checked in code (sources exist and belong to the role, enough outcomes behind it, more than a bare "passed", nothing that loosens a rule or reads like an instruction), then by the Reviewer against what its sources say.
         </div>
         {rejected.length ? (
           <div className="tbl"><table className="use">
@@ -319,6 +323,25 @@ function Checks({ m }: { m: MemoryData }) {
           </table></div>
         ) : <div className="empty" style={{ padding: "8px 0" }}>Every proposed line was kept.</div>}
       </section>
+      {narrowed.length > 0 && (
+        <section className="section">
+          <div className="h2">Lines narrowed</div>
+          <div className="muted" style={{ fontSize: 12.5 }}>
+            The Reviewer found support for part of a line and cut it down. Code kept the cut only when it was narrower than the original and passed the code checks again.
+          </div>
+          <div className="tbl"><table className="use">
+            <thead><tr><th>Proposed</th><th>Kept as</th><th>Whose</th><th>Why</th></tr></thead>
+            <tbody>{narrowed.map((r) => (
+              <tr key={r.id}>
+                <td>{r.from}<div className="sub">week {r.week} · <Sources ids={r.sources.slice(0, 4)} /></div></td>
+                <td>{r.to}</td>
+                <td style={{ whiteSpace: "nowrap" }}>{r.store === "account" ? "Account" : roleWho(r.role ?? "").name}</td>
+                <td>{r.reason}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        </section>
+      )}
       <section className="section">
         <div className="h2">Rollbacks</div>
         <div className="muted" style={{ fontSize: 12.5 }}>A lessons version is judged on the outcomes after it goes live, and rolled back if quality falls.</div>

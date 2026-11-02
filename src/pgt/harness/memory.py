@@ -36,6 +36,8 @@ NOTE_WINDOW_DAYS = 14
 JOURNAL_SHOWN = 12
 # Calls about memory itself; they stay out of the journal a role sees and out of quality scores.
 MEMORY_KINDS = frozenset({"MemoryPass", "MemoryCheck", "NoteTriage"})
+DECIDED_CHARS = 500  # what a call decided, short but complete
+EVIDENCE_ID = re.compile(r"\bev-[\w-]*\w")
 STUBS_SHOWN = 6
 
 Status = Literal["active", "watch", "inactive", "struck"]
@@ -281,41 +283,79 @@ def subjects_of(data) -> list[str]:
     return list(dict.fromkeys(found))[:40]
 
 
+def _fit(variants) -> str:
+    """The first variant that fits DECIDED_CHARS, else the last one cut to fit."""
+    text = ""
+    for text in variants:
+        if len(text) <= DECIDED_CHARS:
+            return text
+    return text[:DECIDED_CHARS]
+
+
 def summarize(output) -> str:
-    """What a call decided, in one line, from its typed output."""
+    """What a call decided, from its typed output: short, but with the reasons and evidence IDs
+    a later check needs."""
     name = type(output).__name__
     if hasattr(output, "changes") and hasattr(output, "summary"):
         changes = [f"{c.kind} {c.target_id}" + (f" to ${c.new_daily_budget:g}"
                                                  if c.new_daily_budget is not None else "")
                    for c in output.changes]
         return (f"{len(changes)} change(s): " + "; ".join(changes) if changes
-                else f"no changes: {output.summary}")[:300]
+                else f"no changes: {output.summary}")[:DECIDED_CHARS]
     if hasattr(output, "recommendation") and hasattr(output, "test_id"):
-        return f"{output.test_id}: {output.recommendation}. {output.rationale}"[:300]
+        return f"{output.test_id}: {output.recommendation}. {output.rationale}"[:DECIDED_CHARS]
     if hasattr(output, "findings"):
-        parts = [f"{f.subject_id} {f.severity}" for f in output.findings]
-        return f"{len(parts)} finding(s): " + "; ".join(parts)[:280]
+        fs = output.findings
+        return _fit(f"{len(fs)} finding(s): " + "; ".join(
+            f"{f.subject_id} {f.severity}" + (f": {f.claim[:width]}" if width else "")
+            for f in fs) for width in (140, 70, 0))
     if hasattr(output, "tests") and hasattr(output, "summary"):
-        return (f"{len(output.tests)} test(s): "
-                + "; ".join(f"{t.name} in {t.campaign_id} ({t.brief.product}, {t.brief.angle})"
-                            for t in output.tests))[:300]
+        def test(t, width):
+            ids = f" [{', '.join(t.evidence_ids[:3])}]" if t.evidence_ids else ""
+            why = f": {t.hypothesis[:width]}" if width else ""
+            return f"{t.name} ({t.brief.product}, {t.brief.angle}){why}{ids}"
+        return _fit(f"{len(output.tests)} test(s): " + "; ".join(test(t, w) for t in output.tests)
+                    for w in (160, 80, 0))
     if hasattr(output, "verdict") and hasattr(output, "issues"):
-        return f"{output.verdict}" + (": " + "; ".join(output.issues) if output.issues else "")
+        checked = getattr(output, "checked", [])
+        return (f"{output.verdict}" + (": " + "; ".join(output.issues) if output.issues else "")
+                + (". Checked: " + "; ".join(checked) if checked else ""))[:DECIDED_CHARS]
     if hasattr(output, "headline") and hasattr(output, "concept"):
         layouts = sorted({s.layout for s in getattr(output, "scenes", [])})
         return (f"{output.concept} | {output.headline}"
-                + (f" | layouts {', '.join(layouts)}" if layouts else ""))[:300]
+                + (f" | layouts {', '.join(layouts)}" if layouts else ""))[:DECIDED_CHARS]
     if hasattr(output, "focus") and hasattr(output, "summary"):
-        return f"focus: {'; '.join(output.focus)}"[:300]
+        return f"focus: {'; '.join(output.focus)}"[:DECIDED_CHARS]
     if hasattr(output, "insights"):
-        return f"{len(output.insights)} insight(s): " + "; ".join(
-            i.angle for i in output.insights)[:280]
+        return (f"{len(output.insights)} insight(s): " + "; ".join(
+            i.angle for i in output.insights))[:DECIDED_CHARS]
     if hasattr(output, "answer"):
-        return str(output.answer)[:300]
+        return str(output.answer)[:DECIDED_CHARS]
     for field in ("summary", "text", "action"):
         if isinstance(getattr(output, field, None), str):
-            return f"{name}: {getattr(output, field)}"[:300]
+            return f"{name}: {getattr(output, field)}"[:DECIDED_CHARS]
     return name
+
+
+def cited_evidence(output) -> list[str]:
+    """Evidence IDs a deliverable cites: every `evidence_ids` list, and IDs written in its text."""
+    found: list[str] = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "evidence_ids" and isinstance(value, list):
+                    found.extend(str(v) for v in value)
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+        elif isinstance(node, str):
+            found.extend(EVIDENCE_ID.findall(node))
+
+    walk(output.model_dump(mode="json") if isinstance(output, BaseModel) else output)
+    return list(dict.fromkeys(found))[:20]
 
 
 def record_entry(ws, role: str, pack, output, note: str, *, sim_day: int | None,
@@ -326,6 +366,7 @@ def record_entry(ws, role: str, pack, output, note: str, *, sim_day: int | None,
         "journal.entry", role,
         {"role": role, "topic": pack.topic, "context_hash": pack.context_hash,
          "kind": type(output).__name__, "decided": summarize(output),
+         "evidence_ids": cited_evidence(output),
          "note_to_self": note, "subjects": subjects_of(source.get("data", {})),
          "week": week_of(sim_day), "day": sim_day, "notes": list(notes_seen)},
         refs=pack.inputs, sim_day=sim_day, loop_id=loop_id,
@@ -361,6 +402,37 @@ def journal(ws, role: str, reader: str) -> list[dict]:
 # review_failed is neutral: the Reviewer's call failed, so nothing was judged.
 GOOD = {"passed": True, "approved": True, "redo": False, "sent_back": False,
         "gate_blocked": False}
+
+
+def _passed_detail(ws, topic: str) -> str:
+    """"published", plus what the review checked when a creative passed review. Nothing is
+    added that did not happen."""
+    if (m := re.fullmatch(r"week(\d+)/creative/(.+)", topic)) is not None:
+        review = ws.artifacts.latest(f"week{m.group(1)}/review/{m.group(2)}")
+        checked = review.content.get("checked") if review is not None else None
+        if review is not None and review.content.get("verdict") == "pass" and checked:
+            return "published; review checked: " + "; ".join(checked)
+    return "published"
+
+
+def _readout_detail(ws, record) -> str:
+    """A test readout as an outcome: the call, then cost per result against target and the
+    results, from the readout's evidence."""
+    c = record.content
+    head = f"{c.get('test_id')}: {c.get('recommendation')}"
+    ids = list(dict.fromkeys([*(i for f in c.get("findings", []) if isinstance(f, dict)
+                                for i in f.get("evidence_ids", [])), *record.evidence_ids]))
+    found = [(i, item.values) for i in ids
+             if (item := ws.ledger.get(i)) is not None and "cost_per_result" in item.values]
+    # The test's own totals (with a target) first, then any ad's.
+    found.sort(key=lambda f: "target_cost_per_result" not in f[1])
+    if found:
+        evidence_id, v = found[0]
+        target = (f" vs target {v['target_cost_per_result']:g}"
+                  if "target_cost_per_result" in v else "")
+        results = f", {v['results']:g} results" if "results" in v else ""
+        return f"{head}. Cost per result {v['cost_per_result']:g}{target}{results} [{evidence_id}]"
+    return f"{head}. {c.get('rationale', '')}".strip(". ")
 
 
 def record_outcomes(ws) -> int:
@@ -413,7 +485,7 @@ def record_outcomes(ws) -> int:
                 continue
             record = ws.artifacts.latest(topic)
             if record is not None and record.author == entry.payload["role"]:
-                add(entry, "passed", record.artifact_id, "published")
+                add(entry, "passed", record.artifact_id, _passed_detail(ws, topic))
 
     def latest_before(topic: str, event_id: int):
         items = [e for e in by_topic.get(topic, []) if e.id < event_id]
@@ -459,7 +531,8 @@ def record_outcomes(ws) -> int:
         test_id, week = m.group(1), m.group(2)
         for judged_topic in (f"week{week}/test_plan", f"week{week}/creative/{test_id}"):
             if (entry := latest_before(judged_topic, 10**12)) is not None:
-                add(entry, "test_result", record.artifact_id, f"{test_id}: {rec}", good=good)
+                add(entry, "test_result", record.artifact_id, _readout_detail(ws, record),
+                    good=good)
 
     for failed in ws.events.list("review.failed"):
         if (entry := latest_before(failed.payload.get("topic", ""), failed.id)) is not None:

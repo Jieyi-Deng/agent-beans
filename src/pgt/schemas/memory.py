@@ -27,8 +27,9 @@ class MemoryPass(_Out):
 
 class LineVerdict(_Out):
     line_id: str
-    ok: bool
-    reason: str  # why not, in one sentence; empty when ok
+    verdict: Literal["keep", "narrow", "reject"]
+    reason: str  # why not, in one sentence; empty on keep
+    narrowed: str  # on narrow: the line cut down to what the sources support; empty otherwise
 
 
 class MemoryCheck(_Out):

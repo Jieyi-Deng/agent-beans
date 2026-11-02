@@ -200,7 +200,7 @@ flowchart LR
 | Week records | Code, when the weekly review closes | Every role (one-line stub in context; full record through `recall_week`) | `week.frozen` |
 | Account memory | Growth Lead, once a week | Every role | `memory.version` |
 | Owner notes | Owner, in the Team Room or with a send-back | The role the note was routed to | `note.routed`, `note.seen`, `note.done` |
-| Journal | Code, after every call: what the role decided, a two-line note to self, and later each outcome | Only that role (`recall_journal`) | `journal.entry`, `journal.outcome` |
+| Journal | Code, after every call: what the role decided (with its reasons and the evidence IDs it cites), a two-line note to self, and later each outcome with what followed | Only that role (`recall_journal`) | `journal.entry`, `journal.outcome` |
 | Lessons | The role, once a week | Only that role | `memory.version` |
 
 The owner edits, strikes and adds lines in the web app's Memory view. An owner line is locked: a role's weekly pass cannot change or drop it, and any change it tries becomes a proposal the owner accepts or rejects. Struck lines stay in the history and can be restored.
@@ -240,17 +240,21 @@ flowchart TB
     match -- "still no" --> empty["memory.pass_empty"]
     match -- "yes" --> code{"Code checks<br/>source, support, loosening, injection"}
     code -- "fail" --> rej["memory.rejected"]
-    code -- "pass" --> rev{"Reviewer check<br/>6 lines per call"}
-    rev -- "fail" --> rej
+    code -- "pass" --> rev{"Reviewer check<br/>sources and their numbers<br/>up to 6 lines per call"}
+    rev -- "reject" --> rej
+    rev -- "narrow" --> cut{"Narrower, and passes<br/>the code checks again?"}
+    cut -- "no" --> rej
+    cut -- "yes" --> nar["memory.narrowed"] --> ver
     rev -- "could not run" --> held["Lines held back,<br/>escalated to the owner"]
-    rev -- "pass" --> ver["New version<br/>owner lines kept verbatim"]
+    rev -- "keep" --> ver["New version<br/>owner lines kept verbatim"]
 ```
 
 | Safeguard | How |
 | --- | --- |
 | Two outcomes minimum | A lesson needs two independent outcomes from different calls, or one owner note. With one it goes on the watch list, shown to the role as something to check, not a rule. Simulated outcomes never count |
 | Narrow, never loosen | A line that permits what the charter or house rules forbid is rejected in code before the Reviewer sees it: raising a cap, skipping the waiting days, a budget order above the daily cap, doubling a budget. Only an owner line may say "never" |
-| No self-grading | Quality is measured by code from outcomes (passed review, approved, no redo), never by the role that wrote the lesson |
+| No self-grading | Quality is measured by code from outcomes (passed review, approved, no redo), never by the role that wrote the lesson. A lesson whose every source only records that the work passed (a bare "pass" entry, an outcome that says "published") is rejected in code: that shows the work was accepted, not why. The role's own note does not change this |
+| Narrowed, never widened | The Reviewer may keep part of a line by returning a narrower rewrite. Code keeps it only if it keeps every condition of the original, adds no widening word (always, all, more), adds no word or number that neither the line nor its sources say, and passes the code checks again. Otherwise the line is rejected, with the rewrite and the reason |
 | Rollback on quality drop | After a lessons version has been live for 5 calls, code compares quality before and after. A drop of more than 0.15 rolls the version back and blocks its lines for 3 weeks |
 | Expiry | A lesson no outcome confirmed for 3 weeks becomes inactive |
 | Anti-collapse | The Media Buyer is flagged when it changes nothing on days with "act" signals; the test plan must keep one exploratory test, so it never shrinks to fixes alone |
@@ -258,7 +262,9 @@ flowchart TB
 | The owner is final | Owner lines are locked, and proposals wait for the owner |
 | Nothing lost in silence | A pass whose lines and drops are both empty while its summary says it added or changed something is sent back once with that reason. If it is still empty, code logs `memory.pass_empty` with the role, store, week and summary, `week.closed` lists it under `empty`, and the Memory view says so on the store and under Checks |
 
-Each pass sees the numbers behind what it cites, not only the IDs. The account pass gets the week record's one-line summary, its test readouts, and an `evidence` map with one short value line per evidence ID the record cites (at most 16). A lesson pass gets the same map for the evidence its journal cites: in what it decided, in outcome details, and in the artifacts its outcomes point at (a change set, a test readout). The Reviewer's memory check gets at most 6 lines per call and a 6,000-token output limit, with one short reason per verdict, so its answer cannot run into the output limit. Each task also names the answer's fields (`lines` as `{id, text, sources}`, `drop`, `summary`): in a live run the model planned its lines under a field name it guessed, and the strict schema then left `lines` empty.
+Each pass sees the numbers behind what it cites, not only the IDs. The account pass gets the week record's one-line summary, its test readouts, and an `evidence` map with one short value line per evidence ID the record cites (at most 16). A lesson pass gets the same map for the evidence its journal cites: in what it decided, in outcome details, and in the artifacts its outcomes point at (a change set, a test readout). Each task also names the answer's fields (`lines` as `{id, text, sources}`, `drop`, `summary`): in a live run the model planned its lines under a field name it guessed, and the strict schema then left `lines` empty. The Reviewer's memory check sees, for each line, up to 6 cited sources at up to 600 characters each: a journal entry's full decided text and the role's own note, an outcome with its detail, a week record with its planned tests and readouts. It also gets one value line for each evidence ID those sources cite (one hop, at most 8 per line). Its rubric judges only whether the sources support the line; "Prefer X when Y" is the expected form of a lesson, not a reason to reject. Each verdict is keep, narrow (with a narrower rewrite) or reject. The check runs at most 6 lines per call, fewer when their sources are long so the input budget never trims a line out, with a 6,000-token output limit and one short reason per verdict. `week.closed` counts lines kept, narrowed and rejected per pass under `checked`, and the Memory view's Checks tab lists narrowed lines next to the ones not kept.
+
+Journal entries and outcomes record enough for that check. A creative review records what it checked, not just "pass"; a test plan records each test's reason and the evidence IDs it cites; every entry keeps those IDs in `evidence_ids`. An outcome carries what followed when something did: a test result gives cost per result against target and the result count, a send-back the owner's note, a redo the review's issues, a creative that passed the review's checks. When nothing followed, a pass stays "published".
 
 ## Deadlines and failures
 
