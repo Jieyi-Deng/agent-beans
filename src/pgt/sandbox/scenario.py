@@ -73,7 +73,7 @@ class Scenario(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     seed: int = 7
-    name: str = "Pallas Fit sandbox"  # how the account is labelled in the app
+    name: str = "Beans' Active sandbox"  # how the account is labelled in the app
     currency: str = "USD"
     campaigns: list[CampaignState]
     ads: list[AdState]
@@ -180,13 +180,13 @@ def fitness_app_drafts() -> list[dict]:
 
 def fitness_app_kit() -> CreativeKit:
     return CreativeKit(
-        brand="Pallas Fit",
-        brand_story="Pallas Fit is for people who keep meaning to work out and keep running out "
+        brand="Beans' Active",
+        brand_story="Beans' Active is for people who keep meaning to work out and keep running out "
         "of day. Every workout is 10 minutes, needs no gear, and fits beside the sofa. The app "
         "counts a streak, not calories: showing up is the win.",
         products=[ProductCard(
             name="phone",
-            what_it_is="The Pallas Fit app on a phone, open on today's 10-minute workout",
+            what_it_is="The Beans' Active app on a phone, open on today's 10-minute workout",
             selling_points=["10-minute workouts", "No equipment", "Daily streaks",
                             "7-day free trial"],
             how_to_show="In someone's hand or propped beside them mid-workout, screen "
@@ -224,7 +224,7 @@ def fitness_app_kit() -> CreativeKit:
 
 def fitness_app_facts() -> SharedFacts:
     return SharedFacts(
-        product="Pallas Fit (synthetic demo app): 10-minute home workouts with daily streaks "
+        product="Beans' Active (synthetic demo app): 10-minute home workouts with daily streaks "
         "and a 7-day free trial",
         audience="Adults 25–40 who want short home workouts",
         goal="free-trial starts",
@@ -422,8 +422,8 @@ class Template:
 
 TEMPLATES: dict[str, Template] = {
     "app": Template(
-        key="app", sandbox_name="Pallas Fit sandbox",
-        blurb="A synthetic fitness app, Pallas Fit, with a week of results already in.",
+        key="app", sandbox_name="Beans' Active sandbox",
+        blurb="A synthetic fitness app, Beans' Active, with a week of results already in.",
         scenario=fitness_app_scenario, facts=fitness_app_facts, history_weeks=1,
     ),
     "ecommerce": Template(

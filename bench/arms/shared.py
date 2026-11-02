@@ -43,9 +43,9 @@ from pgt.schemas import (
     WeeklyBrief,
 )
 
-MAX_ATTEMPTS = 3  # first draft plus two redos, as in PGT
+MAX_ATTEMPTS = 3  # first draft plus two redos, as in Agent Beans
 
-# The same team rules PGT puts in every role's context (a test keeps the copies equal).
+# The same team rules Agent Beans puts in every role's context (a test keeps the copies equal).
 TEAM_RULES = """\
 Team rules:
 - Use only the numbers in the inputs. Do not calculate new numbers; derived metrics are provided.
@@ -307,7 +307,7 @@ def operator_prompt(week: int, drafts: list[AdToCreate]) -> str:
     )
 
 
-# --- The daily check: the same inputs and words as PGT's Analyst and Media Buyer --------------
+# --- The daily check: the same inputs and words as Agent Beans' Analyst and Media Buyer --------------
 
 
 @dataclass

@@ -53,7 +53,7 @@ IMAGE_MODELS = {"muse-image-1.0"}
 
 
 def check_meta_request(body: dict) -> list[str]:
-    """Return the Meta Responses API rules this request breaks (the subset PGT relies on)."""
+    """Return the Meta Responses API rules this request breaks (the subset Agent Beans relies on)."""
     violations: list[str] = []
     if body.get("tool_choice", "auto") != "auto":
         violations.append("tool_choice must be auto")

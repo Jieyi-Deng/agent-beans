@@ -177,7 +177,7 @@ def use_real_account(team: Team, account: dict, transport=None, mcp_transport=No
     Reads go through Meta's Ads MCP (META_ADS_MCP=0 turns it off), with the Graph API as the
     fallback; writes go through the Graph API. The sandbox's history stays in its own file and
     comes back on disconnect. The token stays in memory; the workspace keeps only the account id,
-    the origin date and PGT's own writes. A first connect starts the team cold: the sandbox's
+    the origin date and Agent Beans' own writes. A first connect starts the team cold: the sandbox's
     facts with the house rules chosen at setup, and no history."""
     from pgt.ads.ads_mcp import AdsMcp
     from pgt.ads.graph import Graph
@@ -305,7 +305,7 @@ def create_app(team: Team, web_dist: str | Path | None = None, seed_days: int | 
         for task in list(team.tasks):
             task.cancel()
 
-    app = FastAPI(title="Pallas Growth Team", lifespan=lifespan)
+    app = FastAPI(title="Agent Beans", lifespan=lifespan)
     app.state.team = team
     app.state.graph_transport = None  # tests put a fake Graph here
     app.state.mcp_transport = None  # and a fake Ads MCP server here

@@ -3,7 +3,7 @@
 Reads go through Meta's official Ads MCP server when it can answer them, and through the Graph
 API otherwise; `read_sources()` says which. Writes always go through the Graph API.
 
-PGT's "campaign" is a Meta ad set: that is where the daily budget, the learning phase and the
+Agent Beans' "campaign" is a Meta ad set: that is where the daily budget, the learning phase and the
 ads live. Day 1 is the origin date; `day` counts the complete days since then, so today's partial
 numbers are never read as a finished day.
 
@@ -73,7 +73,7 @@ class MetaAccount:
         self.call_to_action = call_to_action or "LEARN_MORE"
         self._today = today
         self._changes: list[dict] = deepcopy(changes or [])
-        self._on_write = on_write  # called with each write PGT made, so the workspace keeps it
+        self._on_write = on_write  # called with each write Agent Beans made, so the workspace keeps it
         self._state: AccountState | None = None
         self._rows: dict[int, list[InsightRow]] = {}
         self._drafts: list[dict] | None = None
@@ -145,7 +145,7 @@ class MetaAccount:
         return {"mcp": self._mcp is not None, "reads": dict(self._sources), "notes": notes}
 
     def mcp_tools(self) -> dict:
-        """The Ads MCP's tool names and the input schema PGT reads with, to check the mapping."""
+        """The Ads MCP's tool names and the input schema Agent Beans reads with, to check the mapping."""
         if self._mcp is None:
             raise McpUnsupported("The Meta Ads MCP is turned off (META_ADS_MCP=0)")
         tools = self._mcp.tools()
@@ -154,7 +154,7 @@ class MetaAccount:
 
     def drafts(self) -> list[dict]:
         """Unpublished changes staged in Ads Manager, read through the Ads MCP only. Read-only:
-        PGT never publishes or edits a draft. Raises McpError when the MCP cannot read them."""
+        Agent Beans never publishes or edits a draft. Raises McpError when the MCP cannot read them."""
         if self._drafts is None:
             if self._mcp is None:
                 raise McpUnsupported("Drafts are read through the Meta Ads MCP, which is off")
@@ -295,14 +295,14 @@ class MetaAccount:
                          and (selected is None or r.ad_id in selected)])
 
     def changes(self) -> list[dict]:
-        """Every write PGT made to this account, in order, each with the day it happened on."""
+        """Every write Agent Beans made to this account, in order, each with the day it happened on."""
         return deepcopy(self._changes)
 
     def writer(self) -> MetaWriter:
         return MetaWriter(self)
 
     def dump(self) -> dict:
-        """What PGT keeps between runs. No token and no ad data: those are read again."""
+        """What Agent Beans keeps between runs. No token and no ad data: those are read again."""
         return {"account_id": self.account_id, "origin": self.origin.isoformat(),
                 "changes": deepcopy(self._changes)}
 
@@ -346,7 +346,7 @@ class MetaWriter:
         if ad is None:
             raise WriteRefused(f"Ad {ad_id} is not in the team's scope")
         if status != "PAUSED":
-            raise WriteRefused("PGT never turns ads on in a real account. Turn it on in Ads "
+            raise WriteRefused("Agent Beans never turns ads on in a real account. Turn it on in Ads "
                                "Manager.")
         self._graph.post(ad_id, status="PAUSED")
         return self._record("ad_status", ad_id=ad_id, previous=ad.status, status="PAUSED")
@@ -380,7 +380,7 @@ class MetaWriter:
         if copy.description:
             link_data["description"] = copy.description
         made = self._graph.post(
-            f"{account.account_id}/adcreatives", name=f"PGT {creative.creative_id}",
+            f"{account.account_id}/adcreatives", name=f"Agent Beans {creative.creative_id}",
             object_story_spec={"page_id": account.page_id, "link_data": link_data},
         )
         ad = self._graph.post(f"{account.account_id}/ads", name=name, adset_id=campaign_id,

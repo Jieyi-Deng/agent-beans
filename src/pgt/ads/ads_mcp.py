@@ -5,7 +5,7 @@ token as a Bearer token (the Login for Business configuration needs `ads_mcp_man
 transport is injectable so tests run against a fake server and never reach the network.
 
 Meta publishes the tool names but not their parameters, so the arguments are built from the input
-schema the server sends in `tools/list`. Every reply is checked for the fields PGT needs; a read
+schema the server sends in `tools/list`. Every reply is checked for the fields Agent Beans needs; a read
 the MCP cannot answer in full raises McpError, and the account reads it from the Graph API instead.
 Writes never go through here: the Operator writes through the Graph API under the L2 rules.
 """
@@ -29,11 +29,11 @@ McpTransport = Callable[[str, dict, dict], tuple[dict | None, dict]]
 
 
 class McpError(RuntimeError):
-    """The MCP call failed, or its reply lacked what PGT needs. The read falls back to Graph."""
+    """The MCP call failed, or its reply lacked what Agent Beans needs. The read falls back to Graph."""
 
 
 class McpUnsupported(McpError):
-    """The server cannot answer this read at all; PGT stops asking for the rest of the session."""
+    """The server cannot answer this read at all; Agent Beans stops asking for the rest of the session."""
 
 
 def _sse_message(text: str, want_id) -> dict | None:
@@ -148,9 +148,9 @@ class AdsMcp:
             raise McpError(f"{name} did not reply with data") from None
 
 
-# --- the reads PGT makes ---------------------------------------------------------------------
+# --- the reads Agent Beans makes ---------------------------------------------------------------------
 
-# PGT's name for each argument, then the names the server's schema may use for it.
+# Agent Beans' name for each argument, then the names the server's schema may use for it.
 _ARG_NAMES = {
     "account": ("ad_account_id", "account_id", "act_id"),
     "level": ("level", "entity_level", "entity_type"),
@@ -237,7 +237,7 @@ class McpReads:
                 used.add(name)
         missing = [r for r in schema.get("required", []) if r not in used]
         if missing:
-            raise McpUnsupported(f"{ENTITIES_TOOL} needs {', '.join(missing)}, which PGT "
+            raise McpUnsupported(f"{ENTITIES_TOOL} needs {', '.join(missing)}, which Agent Beans "
                                  "does not know how to fill")
         return args
 
@@ -284,7 +284,7 @@ class McpReads:
                 found = next((v for v in values.values() if isinstance(v, list)), None)
             payload = found
         if not isinstance(payload, list) or not all(isinstance(r, dict) for r in payload):
-            raise McpError(f"{ENTITIES_TOOL} replied in a shape PGT does not read")
+            raise McpError(f"{ENTITIES_TOOL} replied in a shape Agent Beans does not read")
         return [self._flat(r) for r in payload]
 
     def _flat(self, row: dict) -> dict:
@@ -386,7 +386,7 @@ class McpReads:
 def _draft_page(payload) -> list[dict]:
     """Drafts come back under `ad_drafts`; live entities there mean the draft read was ignored."""
     if not isinstance(payload, dict):
-        raise McpError(f"{ENTITIES_TOOL} replied to the draft read in a shape PGT does not read")
+        raise McpError(f"{ENTITIES_TOOL} replied to the draft read in a shape Agent Beans does not read")
     values = {k: _decoded(v) for k, v in payload.items()}
     found = values.get("ad_drafts")
     if isinstance(found, dict):

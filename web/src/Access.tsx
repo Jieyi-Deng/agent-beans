@@ -277,7 +277,7 @@ export function Wizard({ a, start, onClose, onDone }: {
       <div className="wiz">
         <div className="row" style={{ gap: 10 }}>
           <img className="mark-logo" src="pallas-logo.png" alt="Pallas" />
-          <div><div className="mark-name">Set up your Growth Team</div><div className="mark-sub">{sub}</div></div>
+          <div><div className="mark-name">Set up Agent Beans</div><div className="mark-sub">{sub}</div></div>
         </div>
         <div className="steps">
           {STEPS.map((n, i) => <div key={n} className={i < step ? "done" : i === step ? "now" : ""}>{i + 1}. {n}</div>)}
@@ -293,10 +293,10 @@ export function Wizard({ a, start, onClose, onDone }: {
             </button>
             <button className={"pick" + (kind === "meta" ? " on" : "") + (metaOff ? " dis" : "")} disabled={!!metaOff} onClick={() => pick("meta")}>
               <span className="rd" /><div><div className="n">Connect a Meta ad account <span className="lbl paused">Local only</span></div>
-                <div className="d">Opens Facebook Login for Business on facebook.com. You choose the ad account and grant access there; PGT never sees your password.{metaOff ? ` ${metaOff}` : ""}</div></div>
+                <div className="d">Opens Facebook Login for Business on facebook.com. You choose the ad account and grant access there; Agent Beans never sees your password.{metaOff ? ` ${metaOff}` : ""}</div></div>
             </button>
           </div>
-          <div className="note"><b>What PGT asks Meta for:</b> <span className="mono">ads_read</span> to read results, and <span className="mono">ads_management</span> only at L2. You can disconnect in Settings at any time.</div>
+          <div className="note"><b>What Agent Beans asks Meta for:</b> <span className="mono">ads_read</span> to read results, and <span className="mono">ads_management</span> only at L2. You can disconnect in Settings at any time.</div>
         </>)}
 
         {step === 1 && (<>

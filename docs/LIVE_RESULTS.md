@@ -30,7 +30,7 @@ Means per arm and scenario.
 
 ## What each daily check proposed
 
-The changes the user was shown, and for PGT what the gate blocked and why.
+The changes the user was shown, and for Agent Beans what the gate blocked and why.
 
 | Arm | Scenario | Seed | Proposed |
 |---|---|---|---|

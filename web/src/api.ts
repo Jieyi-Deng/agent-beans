@@ -1,4 +1,4 @@
-// Types and calls for the PGT web API (src/pgt/api). The server computes every status;
+// Types and calls for the Agent Beans web API (src/pgt/api). The server computes every status;
 // the client only shows what it is given.
 import { useEffect, useState } from "react";
 
@@ -239,7 +239,7 @@ export function costLabel(cost: number | null | undefined): string {
 /** The GitHub Pages build (vite build --mode replay) reads a recorded run from data/ and changes nothing.
  *  `pgt replay` writes those files, named the same way as here. */
 export const REPLAY = import.meta.env.MODE === "replay";
-export const READ_ONLY = "This is a recorded replay, so nothing changes here. Run PGT locally to approve, send back or talk to the team.";
+export const READ_ONLY = "This is a recorded replay, so nothing changes here. Run Agent Beans locally to approve, send back or talk to the team.";
 
 function replayFile(path: string): string {
   // "/api/dashboard?days=7" -> "data/dashboard-7.json"; src/pgt/replay.py names files the same way.

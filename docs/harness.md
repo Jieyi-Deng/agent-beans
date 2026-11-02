@@ -1,6 +1,6 @@
 # The harness
 
-A model can write a good ad and still quote the wrong number, cite a statistic it never saw, follow an instruction hidden in a campaign name, or raise a budget the day after the last raise. Prompting reduces these mistakes; it cannot rule them out. PGT rules them out in code. The roles propose; the harness decides what is allowed to reach the owner and the ad account.
+A model can write a good ad and still quote the wrong number, cite a statistic it never saw, follow an instruction hidden in a campaign name, or raise a budget the day after the last raise. Prompting reduces these mistakes; it cannot rule them out. Agent Beans rules them out in code. The roles propose; the harness decides what is allowed to reach the owner and the ad account.
 
 This page lists each guarantee, how it works, where it lives, and the test that proves it. The offline bench ([BENCH_RESULTS.md](BENCH_RESULTS.md)) removes one component at a time, and each ablation fails exactly the scenario that component exists for.
 
@@ -304,12 +304,12 @@ The bench plants one mistake per scenario in the offline model and checks what r
 
 | Arm | Normal week | Unsupported claim | Wrong number | Prompt injection | Edit after approval | Budget jump | All |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| PGT | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 18/18 |
+| Agent Beans | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 18/18 |
 | OpenAI Agents SDK team | 3/3 | 3/3 | 0/3 | 3/3 | 3/3 | 0/3 | 12/18 |
 | LangGraph team | 3/3 | 3/3 | 0/3 | 3/3 | 0/3 | 0/3 | 9/18 |
 | Single agent | 3/3 | 0/3 | 0/3 | 0/3 | 0/3 | 0/3 | 3/18 |
 
-The frameworks are good at the agent loop, and PGT uses one (Pydantic AI) for that layer. What they do not include is a number check against evidence, a policy gate in code, or an approval bound to content. Adding those to a framework team means rebuilding this harness on top of it. Full tables, ablations and the live runs on Muse are in [BENCH_RESULTS.md](BENCH_RESULTS.md), [LIVE_RESULTS.md](LIVE_RESULTS.md) and [HARNESS_COMPARISON.md](HARNESS_COMPARISON.md).
+The frameworks are good at the agent loop, and Agent Beans uses one (Pydantic AI) for that layer. What they do not include is a number check against evidence, a policy gate in code, or an approval bound to content. Adding those to a framework team means rebuilding this harness on top of it. Full tables, ablations and the live runs on Muse are in [BENCH_RESULTS.md](BENCH_RESULTS.md), [LIVE_RESULTS.md](LIVE_RESULTS.md) and [HARNESS_COMPARISON.md](HARNESS_COMPARISON.md).
 
 ### Memory safeguards
 

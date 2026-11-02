@@ -1,7 +1,7 @@
 """Arm B: one agent with every tool, the usual starting point for an ad agent.
 
 It is a plain Pydantic AI agent on the same Muse model, with the same web search, image model
-and two approval tools. It does not use the PGT harness: no roles, no allowlist, no evidence
+and two approval tools. It does not use the Agent Beans harness: no roles, no allowlist, no evidence
 checks, no content-hash approvals. Its tools write to the sandbox directly. Offline, its
 "judgment" is the script in `scripted_step`, which does the same work as the offline team and
 makes the same planted mistakes.

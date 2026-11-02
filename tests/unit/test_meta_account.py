@@ -16,7 +16,7 @@ ORIGIN = date(2026, 10, 23)  # day 1; "today" is Oct 30, so day 7 is the newest 
 
 
 class FakeGraph:
-    """Answers the Marketing API calls PGT makes, and records every write."""
+    """Answers the Marketing API calls Agent Beans makes, and records every write."""
 
     def __init__(self):
         self.posts: list[tuple[str, dict]] = []

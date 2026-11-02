@@ -128,7 +128,7 @@ function DraftRow({ n, depth }: { n: DraftNode; depth: number }) {
 }
 
 /** Unpublished drafts staged in Ads Manager: a real account's through the Ads MCP, or the sandbox's
- *  synthetic ones. PGT never edits them. */
+ *  synthetic ones. Agent Beans never edits them. */
 function Drafts({ tick }: { tick: number }) {
   const { data, error } = useData(() => api.drafts(), [tick]);
   const c = data?.counts;
