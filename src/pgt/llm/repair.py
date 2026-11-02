@@ -9,6 +9,10 @@ repair ran.
   whitespace and gets its open brackets closed. A cut inside a value is left alone.
 - JSON cut off inside `note_to_self`, the last field and never part of the deliverable: the
   note is trimmed and the JSON closed. A cut anywhere else is left alone.
+- A teammate's answer written as plain sentences, not as the Answer object (seen live: the
+  Analyst used its recall tools, then wrote the answer as text). The text becomes `answer` and
+  the evidence IDs it cites become `evidence_ids`; code then checks those IDs and numbers as
+  it checks any answer. Only for a final_result shaped exactly like Answer.
 """
 
 from __future__ import annotations
@@ -19,6 +23,8 @@ import uuid
 from dataclasses import replace
 
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+
+from pgt.harness.memory import EVIDENCE_ID
 
 WHITESPACE_RUN = 200  # trailing whitespace this long means the model was stuck, not done
 NOTE_KEEP = 480  # characters of a cut-off note kept; code trims it to two lines later
@@ -136,8 +142,30 @@ def close_cut_note(text: str) -> str | None:
     return candidate if _parses(candidate) else None
 
 
+ANSWER_FIELDS = {"answer", "evidence_ids", "note_to_self"}
+
+
+def answer_in_text(response: ModelResponse, tools: dict[str, dict]) -> ToolCallPart | None:
+    """A plain-text answer as a final_result call, when final_result is shaped like Answer and
+    the response is only prose: no tool call, nothing that starts like JSON."""
+    schema = tools.get("final_result") or {}
+    if set(schema.get("properties", {})) != ANSWER_FIELDS:
+        return None
+    if any(isinstance(p, ToolCallPart) for p in response.parts):
+        return None
+    text = "".join(p.content for p in response.parts if isinstance(p, TextPart)).strip()
+    if not text or text[:1] in "{[`<":
+        return None
+    return ToolCallPart("final_result", {
+        "answer": text, "evidence_ids": list(dict.fromkeys(EVIDENCE_ID.findall(text))),
+        "note_to_self": ""}, tool_call_id=f"text_{uuid.uuid4().hex[:12]}")
+
+
 def repair(response: ModelResponse, tools: dict[str, dict]) -> tuple[ModelResponse, list[str]]:
     """The response with the repairs applied, and which ones ran."""
+    if (call := answer_in_text(response, tools)) is not None:
+        rest = [p for p in response.parts if not isinstance(p, TextPart)]
+        return replace(response, parts=[*rest, call]), ["answer_in_text"]
     parts, ran = [], []
     for part in response.parts:
         if isinstance(part, TextPart):
