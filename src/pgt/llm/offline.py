@@ -612,14 +612,24 @@ def _lesson_pass(inputs: dict) -> MemoryPass:
     return MemoryPass(drop=drop, lines=lines[: inputs["max_lessons"]], summary=summary)
 
 
+# What the stand-in reads as a looser habit. Narrower than the code backstop on purpose, so
+# each path is exercised on its own.
+LOOSER_HABITS = ("lighter", "one pass", "saving fixes", "fewer", "skip")
+TIGHTER_HABITS = ("check", "wait", "protect", "before", "only", "avoid")
+
+
 def _memory_check(inputs: dict) -> MemoryCheck:
     verdicts = []
     for line in inputs["lines"]:
         text = line["text"].lower()
         risky = next((fix for phrase, fix in RISKY.items() if phrase in text), None)
-        verdicts.append(LineVerdict(line_id=line["line_id"],
-                                    verdict="keep" if risky is None else "reject",
-                                    reason="" if risky is None else risky, narrowed=""))
+        looser = next((w for w in LOOSER_HABITS if w in text), None)
+        tighter = next((w for w in TIGHTER_HABITS if w in text), None)
+        direction = "loosen" if looser else "tighten" if tighter else "neutral"
+        verdicts.append(LineVerdict(
+            line_id=line["line_id"], verdict="keep" if risky is None else "reject",
+            reason="" if risky is None else risky, narrowed="", direction=direction,
+            direction_reason=f'it says "{looser or tighter}"' if looser or tighter else ""))
     return MemoryCheck(verdicts=verdicts)
 
 

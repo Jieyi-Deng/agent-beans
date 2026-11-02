@@ -123,16 +123,20 @@ export type Note = { id: string; event_id: number; text: string; kind: "message"
                      day: number | null; routed: { to: string; by: string; event_id: number }[]; seen_by: string[];
                      done: { role: string; how: string } | null };
 export type MemProposal = { id: number; ts: string; store: string; role: string | null; line_id: string;
-                            text: string; was: string; by: string; sources: string[] };
+                            text: string; was: string; by: string; sources: string[];
+                            // A line that would loosen a check, gate or habit, and why it was flagged.
+                            kind?: "loosening"; week?: number; status?: string; proposed_as?: string;
+                            flags?: { by: string; why: string }[] };
 export type FactProposal = { id: number; ts: string; sim_day: number | null; key: string; value: unknown;
                              was: unknown; reason: string; evidence_ids?: string[]; by?: string; role?: string;
                              resolved: { accepted: boolean } | null };
 export type Rejected = { id: number; ts: string; store: string; role: string | null; line_id: string; text: string;
-                         sources: string[]; problems: string[]; by: "code" | "reviewer"; week: number };
+                         sources: string[]; problems: string[]; by: string; week: number };
 export type MemoryData = {
   account: MemStore; lessons: Record<string, MemStore>;
   weeks: { week: number; stub: string; event_id: number }[]; closed: number[];
   notes: Note[]; proposals: MemProposal[]; fact_proposals: FactProposal[];
+  decided?: (MemProposal & { accepted: boolean })[];
   charter: Record<string, unknown> | null; charter_version: number;
   rejected: Rejected[];
   narrowed?: { id: number; ts: string; store: string; role: string | null; line_id: string; from: string;

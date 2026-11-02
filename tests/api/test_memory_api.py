@@ -128,3 +128,27 @@ def test_the_owner_accepts_or_rejects_a_fact_proposal(client):
     decided = {p["id"]: p["resolved"]["accepted"]
                for p in client.get("/api/memory").json()["fact_proposals"]}
     assert decided == {first: True, second: False}
+
+
+def test_the_owner_approves_or_declines_a_loosening_line_from_proposals(client):
+    ws = ws_of(client)
+    asked = {}
+    for text in ("Scale winners earlier once cost per result is under target.",
+                 "Skip the second look at a change set when the last two were approved."):
+        e = ws.events.append("memory.proposed", "media_buyer", {
+            "kind": "loosening", "store": "lessons", "role": "media_buyer", "line_id": "l9",
+            "new": True, "text": text, "was": "", "by": "media_buyer", "sources": ["wk-1"],
+            "status": "active", "flags": [{"by": "code", "why": "it says it"}],
+            "checker": "reviewer", "week": 1})
+        asked[text] = e.id
+    waiting = client.get("/api/memory").json()["proposals"]
+    assert {p["id"] for p in waiting if p.get("kind") == "loosening"} == set(asked.values())
+    yes, no = asked.values()
+    assert client.post(f"/api/memory/proposals/{yes}", json={"accept": True}).is_success
+    assert client.post(f"/api/memory/proposals/{no}", json={"accept": False}).is_success
+    assert client.post(f"/api/memory/proposals/{no}", json={"accept": True}).status_code == 409
+    state = client.get("/api/memory").json()
+    assert not any(p.get("kind") == "loosening" for p in state["proposals"])
+    assert {p["id"]: p["accepted"] for p in state["decided"]} == {yes: True, no: False}
+    owner = [x for x in state["lessons"]["media_buyer"]["lines"] if x["author"] == "owner"]
+    assert [x["text"] for x in owner] == [next(iter(asked))] and owner[0]["locked"]

@@ -4,8 +4,10 @@ Runs once per week, after the weekly review (or lazily, when the next review sta
 writes the week record; no model touches it. Then the Growth Lead merges it into the account
 memory and each role that worked this week updates its own lessons. Every proposed line passes
 code checks (sources exist, no instructions, never loosens a rule, enough outcomes behind it)
-and then the Reviewer's check before it is kept. A memory call that fails holds its lines back;
-it never stops the team's work.
+and then a check by another role (the Reviewer; the Analyst for the Reviewer's own lessons)
+before it is kept. A line that would loosen a check, gate or habit is not kept: it goes to the
+owner as a proposal. A memory call that fails holds its lines back; it never stops the team's
+work.
 """
 
 from __future__ import annotations
@@ -210,15 +212,19 @@ def _next_number(ws: Workspace, store: str, role: str | None, prefix: str) -> in
 
 def _candidates(ws: Workspace, store: str, role: str | None, current: mem.StoreView,
                 out: MemoryPass, author: str, week: int) -> list[mem.Line]:
-    """New and changed lines from a pass, with IDs. Unchanged lines are left out."""
+    """New and changed lines from a pass, with IDs. Unchanged lines are left out, and so is a
+    new line that repeats a live one word for word (an owner line, say)."""
     prefix = "a" if store == mem.ACCOUNT else "l"
     by_id = {line.id: line for line in current.lines}
+    live = {sg._norm(line.text) for line in current.lines if line.status in {"active", "watch"}}
     n = _next_number(ws, store, role, prefix)
     found = []
     for draft in out.lines:
         sources = list(dict.fromkeys(s.strip() for s in draft.sources if s.strip()))
         old = by_id.get(draft.id)
         if old is not None and old.text == draft.text.strip() and old.sources == sources:
+            continue
+        if old is None and sg._norm(draft.text) in live:
             continue
         if old is None:
             line = mem.Line(id=f"{prefix}{n}", text=draft.text.strip(), sources=sources,
@@ -238,6 +244,9 @@ def _code_check(ws: Workspace, store: str, role: str | None, line: mem.Line, fac
     if store == mem.LESSONS and (when := sg.rolled_back(ws, role, week).get(sg._norm(line.text))):
         problems.append(f"rolled back in week {when} after quality fell; it may come back once "
                         f"{sg.EXPIRE_WEEKS} weeks have passed")
+    if (when := sg.declined(ws, store, role).get(sg._norm(line.text))) is not None:
+        problems.append(f"the owner declined it in Proposals (week {when}); only the owner can "
+                        "add it now")
     if store == mem.LESSONS and not problems:
         independent, owner_note = sg.support(ws, role, line.sources)
         if not owner_note and line.sources and all(sg.verdict_only(ws, s) for s in line.sources):
@@ -301,7 +310,7 @@ def _source_evidence(ws: Workspace, source: str) -> list[str]:
 
 
 def check_input(ws: Workspace, key: str, store: str, role: str | None, line: mem.Line) -> dict:
-    """What the Reviewer's memory check sees for one line: up to 6 sources, and the numbers
+    """What the memory check sees for one line: up to 6 sources, and the numbers
     behind the evidence they cite."""
     sources = line.sources[:6]
     cited = [i for s in sources for i in _source_evidence(ws, s) if i not in sources]
@@ -477,31 +486,35 @@ async def close_week(ws: Workspace, model: Model, week: int, meter: CostMeter | 
     accepted: dict[str, list[mem.Line]] = {name: [] for name in results}
     failed = sorted(k for k, v in results.items() if v is None)
     items = {key: check_input(ws, key, *pending[key]) for key in pending}
-    batches = check_batches(items)
+    # No role checks its own lines: the Analyst checks the Reviewer's lessons.
+    runs = [(checker, batch) for checker in passes.CHECKERS for batch in check_batches(
+        {k: v for k, v in items.items() if passes.checker_for(*pending[k][:2]) == checker})]
     checks = await asyncio.gather(*(
-        guarded("check" if len(batches) == 1 else f"check {n}/{len(batches)}",
+        guarded("check" if len(runs) == 1 else f"check {n}/{len(runs)}",
                 passes.run_memory_check(scope, model, facts, fv, week,
-                                        [items[key] for key in batch]))
-        for n, batch in enumerate(batches, 1)))
-    held = sum(len(batch) for batch, check in zip(batches, checks, strict=True) if check is None)
+                                        [items[key] for key in batch], checker))
+        for n, (checker, batch) in enumerate(runs, 1)))
+    held = sum(len(batch) for (_, batch), check in zip(runs, checks, strict=True)
+               if check is None)
     if held:
         failed.append("check")
         log("escalation.raised", "reviewer",
             {"role": "reviewer", "reason": f"The memory check for week {week} could not run, "
              f"so {held} new memory line(s) were held back."},
             sim_day=sim_day, loop_id=loop_id)
-    narrowed = []
-    for batch, check in zip(batches, checks, strict=True):
+    narrowed, proposed = [], []
+    waiting = {(p.payload["store"], p.payload.get("role"), sg._norm(p.payload["text"]))
+               for p in mem.open_proposals(ws) if p.payload.get("kind") == "loosening"}
+    for (checker, batch), check in zip(runs, checks, strict=True):
         if check is None:
             continue
+        title = passes.TITLES[checker]
         verdicts = {v.line_id: v for v in check.verdicts}
         for key in batch:
             store, role, line = pending[key]
             name = key.split(":")[0]
             v = verdicts.get(key)
-            if v is not None and v.verdict == "keep":
-                accepted[name].append(line)
-                continue
+            cut = None
             if v is not None and v.verdict == "narrow":
                 # Kept only if code finds it narrower and it passes the code checks again.
                 cut, problems = _code_check(ws, store, role, line.model_copy(
@@ -509,28 +522,53 @@ async def close_week(ws: Workspace, model: Model, week: int, meter: CostMeter | 
                 seen = " ".join([*items[key]["sources"].values(), *items[key]["evidence"].values()])
                 if (why := sg.narrower_problem(line.text, cut.text, seen)) is not None:
                     problems.insert(0, why)
-                if not problems:
-                    accepted[name].append(cut)
-                    narrowed.append({"store": store, "role": role, "line_id": line.id,
-                                     "from": line.text, "to": cut.text, "sources": line.sources,
-                                     "reason": v.reason})
+                if problems:
+                    rejected.append({"store": store, "role": role, "line_id": line.id,
+                                     "text": line.text, "sources": line.sources,
+                                     "problems": [(f'The {title} narrowed it to "{cut.text}" '
+                                                   f"({v.reason}), but {'; '.join(problems)}")],
+                                     "by": "code"})
                     continue
+            elif v is None or v.verdict != "keep":
                 rejected.append({"store": store, "role": role, "line_id": line.id,
                                  "text": line.text, "sources": line.sources,
-                                 "problems": [(f'The Reviewer narrowed it to "{cut.text}" '
-                                               f"({v.reason}), but {'; '.join(problems)}")],
-                                 "by": "code"})
+                                 "problems": [v.reason if v else "no verdict"], "by": checker})
                 continue
-            rejected.append({"store": store, "role": role, "line_id": line.id,
-                             "text": line.text, "sources": line.sources,
-                             "problems": [v.reason if v else "no verdict"], "by": "reviewer"})
+            kept = cut or line
+            # A line that would loosen a check, gate or habit waits for the owner. Either the
+            # checker's label or the code backstop is enough.
+            flags = []
+            if v.direction == "loosen":
+                flags.append({"by": checker, "why": v.direction_reason.strip() or "loosens"})
+            if words := sg.looser(kept.text):
+                flags.append({"by": "code", "why": f'it says "{words}"'})
+            if flags:
+                current = (account if store == mem.ACCOUNT else lessons[role]).lines
+                old = next((x for x in current if x.id == line.id), None)
+                proposed.append({
+                    "kind": "loosening", "store": store, "role": role, "line_id": kept.id,
+                    "new": old is None, "text": kept.text, "was": old.text if old else "",
+                    "by": passes.author_of(store, role), "sources": kept.sources,
+                    "status": kept.status, "flags": flags, "checker": checker,
+                    **({"proposed_as": line.text} if cut else {})})
+                continue
+            accepted[name].append(kept)
+            if cut:
+                narrowed.append({"store": store, "role": role, "line_id": line.id,
+                                 "from": line.text, "to": cut.text, "sources": line.sources,
+                                 "reason": v.reason, "by": checker})
     for r in rejected:
         log("memory.rejected", "system", {**r, "week": week}, sim_day=sim_day, loop_id=loop_id)
     for n in narrowed:
         log("memory.narrowed", "system", {**n, "week": week}, sim_day=sim_day, loop_id=loop_id)
-    # Per pass: lines kept as written, kept narrowed, and rejected (by code or the Reviewer).
-    checked = {name: {"kept": 0, "narrowed": 0, "rejected": 0} for name in results}
-    for kind, found in (("rejected", rejected), ("narrowed", narrowed)):
+    for p in proposed:
+        if (p["store"], p["role"], sg._norm(p["text"])) in waiting:
+            continue  # the same line already waits for the owner
+        log("memory.proposed", p["by"], {**p, "week": week}, sim_day=sim_day, loop_id=loop_id)
+    # Per pass: lines kept as written, kept narrowed, sent to the owner, and rejected.
+    checked = {name: {"kept": 0, "narrowed": 0, "proposed": 0, "rejected": 0}
+               for name in results}
+    for kind, found in (("rejected", rejected), ("narrowed", narrowed), ("proposed", proposed)):
         for r in found:
             checked["account" if r["store"] == mem.ACCOUNT else r["role"]][kind] += 1
     for name, kept in accepted.items():
@@ -561,7 +599,7 @@ async def close_week(ws: Workspace, model: Model, week: int, meter: CostMeter | 
         "week": week, "record": f"wk-{week}", "outcomes_added": added,
         "passes": sorted(results), "failed": failed, "empty": sorted(empty),
         "checked": {k: v for k, v in sorted(checked.items()) if any(v.values())},
-        "versions": written, "rejected": len(rejected),
+        "versions": written, "rejected": len(rejected), "proposed": len(proposed),
         "watch": sum(1 for lines in accepted.values() for line in lines
                      if line.status == "watch"),
         "rolled_back": [r["role"] for r in evaluated if not r["kept"]],

@@ -1,10 +1,11 @@
 // Memory: what the team keeps from week to week. The account memory is shared; each role's
 // lessons are private to it. The owner's edits win and lock the line, and a role can only propose
-// a change to a locked line. Every line cites its sources; code checks each one before it is kept.
+// a change to a locked line. Every line cites its sources; code checks each one before it is kept,
+// and a line that would loosen a check, gate or habit waits in Proposals for the owner.
 import { useState, type ReactNode } from "react";
 import {
   api, onDay, READ_ONLY, REPLAY, useData, type FactProposal, type JournalEntry, type MemLine,
-  type MemoryData, type MemoryEdit, type MemStore, type Note,
+  type MemoryData, type MemoryEdit, type MemProposal, type MemStore, type Note,
 } from "./api";
 import { roleWho } from "./Harness";
 import { go, type Route } from "./route";
@@ -118,13 +119,16 @@ function storeNotes(m: MemoryData, kind: "account" | "lessons", role: string | n
   for (const f of m.failed.filter((x) => x.pass === pass && x.week === week))
     out.push(`Week ${week}: the ${passName(pass)} failed (${f.error}).`);
   const held = m.failed.some((x) => x.pass.startsWith("check") && x.week === week);
-  if (held) out.push(`Week ${week}: the Reviewer's memory check could not run, so new lines were held back.`);
+  if (held) out.push(`Week ${week}: the memory check could not run, so new lines were held back.`);
   const rejected = m.rejected.filter((r) => r.week === week && r.store === kind && (kind === "account" || r.role === role));
   if (rejected.length)
     out.push(`Week ${week}: ${rejected.length} proposed line${rejected.length === 1 ? " was" : "s were"} not kept. See Checks for why.`);
   const narrowed = (m.narrowed ?? []).filter((r) => r.week === week && r.store === kind && (kind === "account" || r.role === role));
   if (narrowed.length)
     out.push(`Week ${week}: ${narrowed.length} line${narrowed.length === 1 ? " was" : "s were"} kept in a narrower form than proposed. See Checks.`);
+  const looser = [...m.proposals, ...(m.decided ?? [])].filter((p) => p.kind === "loosening" && p.week === week && p.store === kind && (kind === "account" || p.role === role));
+  if (looser.length)
+    out.push(`Week ${week}: ${looser.length} line${looser.length === 1 ? "" : "s"} would loosen a check or habit, so ${looser.length === 1 ? "it went" : "they went"} to Proposals for your decision.`);
   return out;
 }
 
@@ -243,23 +247,61 @@ function factValue(v: unknown): string {
   return String(v);
 }
 
+function storeName(p: { store: string; role: string | null }) {
+  return p.store === "account" ? "Account memory" : `${roleWho(p.role ?? "").name}'s lessons`;
+}
+
+function flaggedBy(by: string) {
+  return by === "code" ? "Code" : roleWho(by).name;
+}
+
+function LooserRow({ p, buttons }: { p: MemProposal; buttons: ReactNode }) {
+  return (
+    <div className="prop">
+      <div className="col" style={{ gap: 4, minWidth: 0 }}>
+        <div className="mono faint" style={{ fontSize: 11 }}>{storeName(p)} · from {roleWho(p.by).name}{p.week ? ` · week ${p.week}` : ""}</div>
+        {p.was && <div className="was">{p.was}</div>}
+        <div className="ink">{p.text}</div>
+        {(p.flags ?? []).map((f, i) => <div key={i} className="muted" style={{ fontSize: 12.5 }}>Flagged by {flaggedBy(f.by)}: {f.why}</div>)}
+        {p.sources.length > 0 && <div><Sources ids={p.sources} /></div>}
+      </div>
+      {buttons}
+    </div>
+  );
+}
+
 function Proposals({ m, act, busy }: { m: MemoryData; act: Act; busy: boolean }) {
   const facts = [...m.fact_proposals].reverse();
   const open = facts.filter((f) => !f.resolved);
   const decided = facts.filter((f) => f.resolved);
+  const looser = m.proposals.filter((p) => p.kind === "loosening");
+  const owned = m.proposals.filter((p) => p.kind !== "loosening");
+  const looserDecided = [...(m.decided ?? [])].filter((p) => p.kind === "loosening").reverse();
   const decide = (fn: () => Promise<unknown>) => act(fn);
-  const Buttons = ({ onYes, onNo }: { onYes: () => void; onNo: () => void }) => REPLAY ? null : (
+  const Buttons = ({ onYes, onNo, yes = "Accept", no = "Reject" }: {
+    onYes: () => void; onNo: () => void; yes?: string; no?: string;
+  }) => REPLAY ? null : (
     <div className="row" style={{ gap: 6 }}>
-      <button className="btn pri xs" disabled={busy} onClick={onYes}>Accept</button>
-      <button className="btn ghost xs" disabled={busy} onClick={onNo}>Reject</button>
+      <button className="btn pri xs" disabled={busy} onClick={onYes}>{yes}</button>
+      <button className="btn ghost xs" disabled={busy} onClick={onNo}>{no}</button>
     </div>
   );
   return (
     <div className="col" style={{ gap: 16 }}>
       <section className="section">
+        <div className="h2">Lines that loosen a check</div>
+        <div className="muted" style={{ fontSize: 12.5 }}>A line that would make a check, gate or habit less strict (fewer fixes, fewer checks, scaling sooner, wider limits, a skipped step) never applies on its own. Approve it to write it as your line; decline it to drop it, and the role cannot propose it again.</div>
+        {looser.length ? looser.map((p) => <LooserRow key={p.id} p={p} buttons={
+          <Buttons yes="Approve" no="Decline" onYes={() => decide(() => api.decideMemory(p.id, true))} onNo={() => decide(() => api.decideMemory(p.id, false))} />} />)
+          : <div className="empty" style={{ padding: "8px 0" }}>None waiting.</div>}
+        {looserDecided.length > 0 && <div className="eyebrow" style={{ marginTop: 8 }}>Decided</div>}
+        {looserDecided.map((p) => <LooserRow key={p.id} p={p} buttons={
+          <span className={p.accepted ? "lbl ok" : "lbl draft"}>{p.accepted ? "Approved" : "Declined"}</span>} />)}
+      </section>
+      <section className="section">
         <div className="h2">Changes to your lines</div>
         <div className="muted" style={{ fontSize: 12.5 }}>A role cannot change a line you wrote or edited. When its weekly pass would, it asks here.</div>
-        {m.proposals.length ? m.proposals.map((p) => (
+        {owned.length ? owned.map((p) => (
           <div key={p.id} className="prop">
             <div className="col" style={{ gap: 4, minWidth: 0 }}>
               <div className="mono faint" style={{ fontSize: 11 }}>{p.store === "account" ? "Account memory" : `${roleWho(p.role ?? "").name}'s lessons`} · {p.line_id} · from {roleWho(p.by).name}</div>
@@ -307,7 +349,7 @@ function Checks({ m }: { m: MemoryData }) {
       <section className="section">
         <div className="h2">Lines not kept</div>
         <div className="muted" style={{ fontSize: 12.5 }}>
-          Every proposed line is checked in code (sources exist and belong to the role, enough outcomes behind it, more than a bare "passed", nothing that loosens a rule or reads like an instruction), then by the Reviewer against what its sources say.
+          Every proposed line is checked in code (sources exist and belong to the role, enough outcomes behind it, more than a bare "passed", nothing that loosens a rule or reads like an instruction), then by another role against what its sources say: the Reviewer, or the Analyst for the Reviewer's own lessons. A line that would loosen a check or habit goes to Proposals instead of being kept.
         </div>
         {rejected.length ? (
           <div className="tbl"><table className="use">
@@ -327,7 +369,7 @@ function Checks({ m }: { m: MemoryData }) {
         <section className="section">
           <div className="h2">Lines narrowed</div>
           <div className="muted" style={{ fontSize: 12.5 }}>
-            The Reviewer found support for part of a line and cut it down. Code kept the cut only when it was narrower than the original and passed the code checks again.
+            The check found support for part of a line and cut it down. Code kept the cut only when it was narrower than the original and passed the code checks again.
           </div>
           <div className="tbl"><table className="use">
             <thead><tr><th>Proposed</th><th>Kept as</th><th>Whose</th><th>Why</th></tr></thead>
