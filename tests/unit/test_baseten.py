@@ -13,7 +13,7 @@ from pgt.harness.workspace import Workspace
 from pgt.llm.baseten import BASETEN_MODEL, MAX_OUTPUT, baseten_client, chat_model
 from pgt.llm.fake import MetaFake
 from pgt.llm.meta import estimate_cost, responses_model
-from pgt.llm.repair import close_cut_json, tool_calls_in_text
+from pgt.llm.repair import NOTE_KEEP, close_cut_json, close_cut_note, tool_calls_in_text
 from pgt.llm.routing import RoleRouter, mixed, resolve
 from pgt.llm.runtime import Scope, run_role
 from pgt.roles.tools import evidence_tool
@@ -278,6 +278,31 @@ def test_json_stuck_in_trailing_whitespace_is_closed_without_a_retry():
     assert out == Findings(findings=[])
     assert len(fake.bodies) == 1
     assert ws.events.list("model.call")[-1].payload["repaired"] == ["cut_json"]
+
+
+def test_a_runaway_note_is_trimmed_without_a_retry():
+    """Seen live: the deliverable was done, then note_to_self ran on until the output limit."""
+    fake = BasetenFake(json_answer='{"findings":[],"note_to_self":"' + "Keep this. " * 600,
+                       finish="length")
+    ws = Workspace()
+    scope = Scope(ws, CostMeter(ws.events), "loop-1", 1)
+    out = asyncio.run(run_role("reviewer", Findings, pack(), scope, chat_model(fake.client())))
+    assert out == Findings(findings=[])
+    assert len(fake.bodies) == 1
+    assert ws.events.list("model.call")[-1].payload["repaired"] == ["cut_note"]
+    schema = json.dumps(fake.bodies[0])
+    assert "at most 2 short lines" in schema
+
+
+def test_the_note_repair_stays_inside_the_note():
+    cut = '{"a": [1], "note_to_self": "' + "x" * 2_000
+    fixed = close_cut_note(cut)
+    assert fixed is not None and len(json.loads(fixed)["note_to_self"]) == NOTE_KEEP
+    assert close_cut_note('{"a": "half a sent') is None  # cut inside the deliverable
+    assert close_cut_note('{"note_to_self": "x", "a": "half') is None  # note is not the cut
+    assert close_cut_note('{"a": 1, "note_to_self": "ok"}') is None  # nothing to repair
+    assert json.loads(close_cut_note('{"note_to_self": "ends on \\u00')) == {
+        "note_to_self": "ends on "}  # half an escape is dropped
 
 
 def test_repairs_stay_narrow():

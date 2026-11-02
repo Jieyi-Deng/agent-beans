@@ -138,6 +138,8 @@ export type MemoryData = {
     to_version: number; reason: string }[];
   collapse: { id: number; role: string; reason: string }[];
   failed: { id: number; pass: string; week: number; error: string }[];
+  empty?: { id: number; pass: string; store: string; role: string | null; week: number; summary: string }[];
+  sent_back?: { id: number; role: string; topic: string; reason: string }[];
 };
 export type Outcome = { id: string; outcome: string; good: boolean | null; detail: string; simulated?: boolean };
 export type JournalEntry = { id: string; event_id: number; loop_id: string; role: string; topic: string;

@@ -26,6 +26,9 @@ from pgt.schemas import MemoryPass
 
 JOURNAL_FOR_PASS = 30  # journal entries a role sees in its lesson pass
 SOURCE_CHARS = 200
+EVIDENCE_FOR_PASS = 16  # evidence entries, with their numbers, a memory pass sees
+CHECK_BATCH = 6  # memory lines per Reviewer check call
+EVIDENCE_ID = re.compile(r"\bev-[\w-]+")
 
 
 # --- The week record -----------------------------------------------------------------------------
@@ -145,6 +148,45 @@ def freeze_week(ws: Workspace, week: int) -> dict:
     ws.events.append("week.frozen", "system", record, refs=record["evidence_ids"],
                      sim_day=max(week_days(week)), loop_id=f"close-w{week}")
     return mem.week_record(ws, week)
+
+
+# --- What a memory pass sees ---------------------------------------------------------------------
+
+
+def _number(v: float) -> str:
+    return str(int(v)) if float(v).is_integer() else str(v)
+
+
+def evidence_values(ws: Workspace, ids) -> dict[str, str]:
+    """One short line per evidence ID: its numbers as recorded, then its note. Unknown IDs are
+    left out; at most EVIDENCE_FOR_PASS entries."""
+    out: dict[str, str] = {}
+    for evidence_id in dict.fromkeys(ids):
+        if len(out) >= EVIDENCE_FOR_PASS:
+            break
+        item = ws.ledger.get(evidence_id)
+        if item is None:
+            continue
+        values = ", ".join(f"{k} {_number(v)}" for k, v in list(item.values.items())[:8])
+        out[evidence_id] = f"{values}. {item.note[:100]}".strip(". ") if item.note else values
+    return out
+
+
+def _cited_evidence(ws: Workspace, entries: list[dict]) -> list[str]:
+    """Evidence IDs a role's journal cites: in what it decided and in outcome details first,
+    then those of the artifacts its outcomes point at (a change set, a test readout)."""
+    found: list[str] = []
+    later: list[str] = []
+    for e in entries:
+        found += EVIDENCE_ID.findall(e.get("decided", ""))
+        for o in e.get("outcomes", []):
+            found += EVIDENCE_ID.findall(o.get("detail", ""))
+            source = str(o.get("source", ""))
+            if "@v" in source and (record := ws.artifacts.get(source)) is not None:
+                later += record.evidence_ids
+                later += [i for f in record.content.get("findings", [])
+                          if isinstance(f, dict) for i in f.get("evidence_ids", [])]
+    return found + later
 
 
 # --- Merging a memory pass -----------------------------------------------------------------------
@@ -300,7 +342,9 @@ async def close_week(ws: Workspace, model: Model, week: int, meter: CostMeter | 
         scope, model, facts, fv, week, record,
         [{"id": line.id, "text": line.text, "sources": line.sources, "owner": line.locked}
          for line in account.active()],
-        week_notes, mem.MAX_ACCOUNT_LINES)}
+        week_notes, mem.MAX_ACCOUNT_LINES,
+        evidence_values(ws, [*record.get("evidence_ids", []),
+                             *(i for r in record.get("readouts", []) for i in r["evidence_ids"])]))}
 
     # Each role that worked looks back at its own journal.
     lessons: dict[str, mem.StoreView] = {}
@@ -324,17 +368,31 @@ async def close_week(ws: Workspace, model: Model, week: int, meter: CostMeter | 
                  for e in recent[-JOURNAL_FOR_PASS:]]
         notes = [{"id": n["id"], "text": n["text"][:300], "day": n["day"]}
                  for n in mem.notes_for(ws, role, sim_day)]
+        cited = _cited_evidence(ws, [{**e, "outcomes": [
+            o for o in e["outcomes"] if not o.get("simulated")]} for e in recent[-JOURNAL_FOR_PASS:]])
         jobs[role] = passes.run_lesson_pass(
             scope, model, facts, fv, role, week, shown,
             [{"id": line.id, "text": line.text, "sources": line.sources, "status": line.status,
               "owner": line.locked, "flag": line.flag}
              for line in current.lines if line.status in {"active", "watch"}],
-            notes, flags, mem.MAX_LESSONS)
+            notes, flags, mem.MAX_LESSONS, evidence_values(ws, cited))
 
     results = dict(zip(jobs, await asyncio.gather(
         *(guarded(name, job) for name, job in jobs.items())), strict=True))
 
-    # Code checks first; then one Reviewer call for everything that passed.
+    # A pass that came back empty without saying "no change" (after one send-back) is logged,
+    # so an empty store explains itself.
+    empty = []
+    for name, out in results.items():
+        if out is not None and (problem := passes.empty_problem(out)) is not None:
+            store, role = (mem.ACCOUNT, None) if name == "account" else (mem.LESSONS, name)
+            log("memory.pass_empty", "system",
+                {"pass": name, "store": store, "role": role, "week": week,
+                 "summary": out.summary[:300], "problem": problem[:300]},
+                sim_day=sim_day, loop_id=loop_id)
+            empty.append(name)
+
+    # Code checks first; then the Reviewer, a few lines per call so its answer stays short.
     pending: dict[str, tuple[str, str | None, mem.Line]] = {}
     rejected = []
     drops: dict[str, list[str]] = {}
@@ -356,30 +414,39 @@ async def close_week(ws: Workspace, model: Model, week: int, meter: CostMeter | 
 
     accepted: dict[str, list[mem.Line]] = {name: [] for name in results}
     failed = sorted(k for k, v in results.items() if v is None)
-    if pending:
-        check = await guarded("check", passes.run_memory_check(
-            scope, model, facts, fv, week,
-            [{"line_id": key, "store": store, "role": role or "team", "text": line.text,
-              "status": line.status,
-              "sources": {s: _source_text(ws, s) for s in line.sources[:6]}}
-             for key, (store, role, line) in pending.items()]))
+    keys = list(pending)
+    batches = [keys[i:i + CHECK_BATCH] for i in range(0, len(keys), CHECK_BATCH)]
+    checks = await asyncio.gather(*(
+        guarded("check" if len(batches) == 1 else f"check {n}/{len(batches)}",
+                passes.run_memory_check(
+                    scope, model, facts, fv, week,
+                    [{"line_id": key, "store": pending[key][0],
+                      "role": pending[key][1] or "team", "text": pending[key][2].text,
+                      "status": pending[key][2].status,
+                      "sources": {s: _source_text(ws, s) for s in pending[key][2].sources[:6]}}
+                     for key in batch]))
+        for n, batch in enumerate(batches, 1)))
+    held = sum(len(batch) for batch, check in zip(batches, checks, strict=True) if check is None)
+    if held:
+        failed.append("check")
+        log("escalation.raised", "reviewer",
+            {"role": "reviewer", "reason": f"The memory check for week {week} could not run, "
+             f"so {held} new memory line(s) were held back."},
+            sim_day=sim_day, loop_id=loop_id)
+    for batch, check in zip(batches, checks, strict=True):
         if check is None:
-            failed.append("check")
-            log("escalation.raised", "reviewer",
-                {"role": "reviewer", "reason": f"The memory check for week {week} could not "
-                 f"run, so {len(pending)} new memory line(s) were held back."},
-                sim_day=sim_day, loop_id=loop_id)
-        else:
-            verdicts = {v.line_id: v for v in check.verdicts}
-            for key, (store, role, line) in pending.items():
-                v = verdicts.get(key)
-                if v is not None and v.ok:
-                    accepted[key.split(":")[0]].append(line)
-                else:
-                    rejected.append({"store": store, "role": role, "line_id": line.id,
-                                     "text": line.text, "sources": line.sources,
-                                     "problems": [v.reason if v else "no verdict"],
-                                     "by": "reviewer"})
+            continue
+        verdicts = {v.line_id: v for v in check.verdicts}
+        for key in batch:
+            store, role, line = pending[key]
+            v = verdicts.get(key)
+            if v is not None and v.ok:
+                accepted[key.split(":")[0]].append(line)
+            else:
+                rejected.append({"store": store, "role": role, "line_id": line.id,
+                                 "text": line.text, "sources": line.sources,
+                                 "problems": [v.reason if v else "no verdict"],
+                                 "by": "reviewer"})
     for r in rejected:
         log("memory.rejected", "system", {**r, "week": week}, sim_day=sim_day, loop_id=loop_id)
 
@@ -406,7 +473,7 @@ async def close_week(ws: Workspace, model: Model, week: int, meter: CostMeter | 
 
     summary = {
         "week": week, "record": f"wk-{week}", "outcomes_added": added,
-        "passes": sorted(results), "failed": failed,
+        "passes": sorted(results), "failed": failed, "empty": sorted(empty),
         "versions": written, "rejected": len(rejected),
         "watch": sum(1 for lines in accepted.values() for line in lines
                      if line.status == "watch"),
