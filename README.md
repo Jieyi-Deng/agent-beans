@@ -4,7 +4,7 @@ An always-on AI growth team for Meta ads, built on Meta's Muse models for the Me
 
 Agent Beans checks your ad account every day, plans and makes new ads every week, and never changes anything without your approval. Every number it shows traces back to the source data.
 
-**Live demo:** [pallas-ads.github.io/pallas-growth](https://pallas-ads.github.io/pallas-growth/), the project homepage with read-only recordings of two live runs on synthetic sandbox accounts: Northpaw Supply, a pet-supplies store (14 daily checks and one weekly review with three new ads, $1.14 of model calls), and Beans' Active, a fitness app with no ad history ($0.96).
+**Live demo:** [pallas-ads.github.io/pallas-growth](https://pallas-ads.github.io/pallas-growth/), the project homepage with read-only recordings of two live runs on synthetic sandbox accounts: Northpaw Supply, a pet-supplies store (14 daily checks and one weekly review with three new ads, $1.14 of model calls), and Beans' Active, a fitness app with no ad history ($1.28).
 
 ## How it works
 

@@ -284,7 +284,7 @@ flowchart TB
     ci --> pages["GitHub Pages"]
 ```
 
-The replay build of the web app maps each API path to a JSON file (`/api/dashboard?days=7` becomes `data/dashboard-7.json`) and hides every control that would write.
+The replay build of the web app maps each API path to a JSON file (`/api/dashboard?days=7` becomes `data/dashboard-7.json`) and hides every control that would write. The owner's name and picture are not part of any prompt, only of the pages, so each recording carries its own owner: Rosa, shown by initials, runs Northpaw, and Jieyi runs Beans' Active.
 
 ## Testing
 
