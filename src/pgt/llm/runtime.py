@@ -330,7 +330,8 @@ class _Harness(AbstractCapability):
                 self._log_call(model_name, None, failure="provider", started=started,
                                request_hash=request_hash, attempt=attempt, deadline=deadline)
                 raise
-        # A tool call written as text, or JSON stuck in trailing whitespace (see repair.py).
+        # Good answers in the wrong shape: a tool call written as text, JSON cut off or with
+        # raw tabs in its strings (see repair.py).
         offered = {t.name: t.parameters_json_schema
                    for t in [*params.output_tools, *params.function_tools]}
         response, repaired = repair(response, offered)

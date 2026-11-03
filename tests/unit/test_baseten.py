@@ -6,6 +6,7 @@ import json
 import httpx
 import pytest
 from openai import AsyncOpenAI
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 
 from pgt.harness.context import assemble
 from pgt.harness.policy import CostMeter
@@ -13,7 +14,14 @@ from pgt.harness.workspace import Workspace
 from pgt.llm.baseten import BASETEN_MODEL, MAX_OUTPUT, baseten_client, chat_model
 from pgt.llm.fake import MetaFake
 from pgt.llm.meta import estimate_cost, responses_model
-from pgt.llm.repair import NOTE_KEEP, close_cut_json, close_cut_note, tool_calls_in_text
+from pgt.llm.repair import (
+    NOTE_KEEP,
+    close_cut_json,
+    close_cut_note,
+    escape_control_chars,
+    repair,
+    tool_calls_in_text,
+)
 from pgt.llm.routing import RoleRouter, mixed, resolve
 from pgt.llm.runtime import Scope, run_role
 from pgt.roles.tools import evidence_tool
@@ -318,6 +326,39 @@ def test_repairs_stay_narrow():
         "properties": {"findings": {"type": "array"}, "note_to_self": {"type": "string"}}}})
     assert call.args == {"findings": [], "note_to_self": ""} and rest == ""
 
+
+
+def test_raw_tabs_inside_strings_are_escaped_without_a_retry():
+    """Seen live in golden18: the Producer's lessons pass padded its JSON with tabs, inside
+    strings as well as between them, and failed strict JSON three times running."""
+    fake = BasetenFake(json_answer='{"findings":\t[] \t,\t\t"note_to_self"\t: " \t\t\t\t"}')
+    ws = Workspace()
+    scope = Scope(ws, CostMeter(ws.events), "loop-1", 1)
+    out = asyncio.run(run_role("reviewer", Findings, pack(), scope, chat_model(fake.client())))
+    assert out == Findings(findings=[])
+    assert len(fake.bodies) == 1
+    assert ws.events.list("model.call")[-1].payload["repaired"] == ["control_chars"]
+
+
+def test_the_control_character_repair_stays_inside_strings():
+    fixed = escape_control_chars('{"a":\t"x\ty", "b": ["line\nbreak\x01"]}')
+    assert fixed == '{"a":\t"x\\ty", "b": ["line\\nbreak\\u0001"]}'
+    assert json.loads(fixed) == {"a": "x\ty", "b": ["line\nbreak\x01"]}  # same strings
+    assert json.loads(escape_control_chars('{"a": "say \\"hi\\"\tnow"}')) == {"a": 'say "hi"\tnow'}
+    assert escape_control_chars('```json\n{"a": "x\ty"}\n```') == '```json\n{"a": "x\\ty"}\n```'
+    assert escape_control_chars('{\n\t"a": [1,\t2]\n}') is None  # whitespace between values
+    assert escape_control_chars('{"a": 1} then\t"prose\t"') is None  # nothing after the JSON
+    assert escape_control_chars("The answer\tis here") is None  # not JSON
+
+
+def test_escaped_json_still_gets_the_cut_repairs():
+    text = '{"findings": [], "note_to_self": "\t' + "x" * 2_000
+    response, ran = repair(ModelResponse(parts=[TextPart(text)]), {})
+    assert ran == ["control_chars", "cut_note"]
+    assert json.loads(response.parts[0].content)["note_to_self"].startswith("\tx")
+    call = ToolCallPart("final_result", '{"findings": [], "note_to_self": "a\tb"}')
+    response, ran = repair(ModelResponse(parts=[call]), {"final_result": {}})
+    assert ran == ["control_chars"] and response.parts[0].args_as_dict()["note_to_self"] == "a\tb"
 
 # --- Answers in prose: a teammate's question, and the owner's ----------------------------------
 
