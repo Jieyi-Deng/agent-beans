@@ -191,7 +191,11 @@ export type SeenCall = { event_id: number; ts: string; loop_id: string | null; s
 export type Mode = "offline" | "live" | "mixed";
 export type AppStatus = { busy: string | null; error: string | null; where: string;
                           day: number | null; day_one?: string | null; last_event_id: number;
-                          owner: string; mode: Mode };
+                          mode: Mode } & OwnerProfile;
+
+/** The owner's name and picture. `owner_set` is false until they give a name; the picture is
+ *  null when they have none, and the app draws their initials. */
+export type OwnerProfile = { owner: string; owner_set: boolean; owner_avatar: string | null };
 
 /** Model calls for one role or one deliverable, at list price. */
 export type Tally = {
@@ -303,18 +307,25 @@ export const api = {
   harness: () => call<HarnessData>("/api/harness"),
   calls: (topic: string) => call<{ items: CallRow[] }>(`/api/calls?topic=${topic}`),
   seen: (id: number) => call<SeenCall>(`/api/calls/${id}`),
-  upload: async (file: File) => {
-    if (REPLAY) throw new Error(READ_ONLY);
-    const res = await fetch(`/api/assets/upload?name=${encodeURIComponent(file.name)}`,
-                            { method: "POST", body: file });
-    if (!res.ok) {
-      let detail = res.statusText;
-      try { detail = (await res.json()).detail ?? detail; } catch { /* plain text error */ }
-      throw new Error(detail);
-    }
-    return res.json() as Promise<{ ok: boolean; id: string }>;
-  },
+  upload: (file: File) =>
+    send<{ ok: boolean; id: string }>(`/api/assets/upload?name=${encodeURIComponent(file.name)}`, file),
+  setOwner: (name: string) =>
+    call<OwnerProfile>("/api/owner", { method: "POST", body: JSON.stringify({ name }) }),
+  ownerPhoto: (file: File) => send<OwnerProfile>("/api/owner/avatar", file),
+  clearOwnerPhoto: () => call<OwnerProfile>("/api/owner/avatar", { method: "DELETE" }),
 };
+
+/** Posts a file as the raw request body. */
+async function send<T>(path: string, file: File): Promise<T> {
+  if (REPLAY) throw new Error(READ_ONLY);
+  const res = await fetch(path, { method: "POST", body: file });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { detail = (await res.json()).detail ?? detail; } catch { /* plain text error */ }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<T>;
+}
 
 /** A counter that goes up whenever the event log or the team's busy state changes. */
 export function useLive(): { tick: number; busy: string | null } {

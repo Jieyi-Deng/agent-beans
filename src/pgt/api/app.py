@@ -25,6 +25,7 @@ from pgt.ads import meta_login
 from pgt.api import board, views
 from pgt.api.memory_routes import add_memory_routes
 from pgt.harness import access
+from pgt.harness import owner as owner_profile
 from pgt.harness.workspace import Workspace
 from pgt.loops.notes import route_message, route_send_back, triage_notes
 from pgt.schemas import ChangeSet
@@ -284,7 +285,33 @@ class Level(BaseModel):
     level: int = Field(ge=0, le=2)
 
 
+class Owner(BaseModel):
+    name: str
+
+
 MAX_UPLOAD = 5 * 1024 * 1024
+
+
+def _image(body: bytes):
+    """An uploaded PNG or JPEG, opened and checked. Anything else is refused."""
+    import io
+
+    from PIL import Image, UnidentifiedImageError
+
+    if not body:
+        raise HTTPException(400, "Empty upload")
+    if len(body) > MAX_UPLOAD:
+        raise HTTPException(413, "Images up to 5 MB")
+    try:
+        img = Image.open(io.BytesIO(body))
+        if img.format not in ("PNG", "JPEG"):
+            raise HTTPException(415, "PNG or JPEG only")
+        if img.width * img.height > 40_000_000:
+            raise HTTPException(413, "Image too large")
+        img.load()
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+        raise HTTPException(415, "Not an image") from exc
+    return img
 
 
 def create_app(team: Team, web_dist: str | Path | None = None, seed_days: int | None = 7) -> FastAPI:
@@ -321,14 +348,44 @@ def create_app(team: Team, web_dist: str | Path | None = None, seed_days: int | 
             raise HTTPException(404, f"No deliverable {key}")
         return record
 
+    def _owner() -> dict:
+        picture = owner_profile.avatar_path(team.ws, team.media_dir)
+        return {"owner": owner_profile.name(team.ws),
+                "owner_set": owner_profile.profile(team.ws)["name"] is not None,
+                "owner_avatar": views._media_url(str(picture), team.media_dir) if picture else None}
+
     @app.get("/api/status")
     async def status():
         last = team.ws.events.list(since_id=0)[-1:] or []
         return {"busy": team.busy, "error": team.error, "where": views.where(team.ws),
                 "day": team.account.day if team.account else None,
                 "day_one": (start := views.ws_day_one(team.ws)) and start.isoformat(),
-                "last_event_id": last[0].id if last else 0, "owner": views.OWNER,
+                "last_event_id": last[0].id if last else 0, **_owner(),
                 "mode": team.mode}
+
+    @app.post("/api/owner")
+    async def set_owner(body: Owner):
+        """The name the team uses for the owner. It never reaches a prompt."""
+        try:
+            owner_profile.set_name(team.ws, body.name,
+                                   team.account.day if team.account else None)
+        except owner_profile.ProfileError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"ok": True, **_owner()}
+
+    @app.post("/api/owner/avatar")
+    async def set_owner_avatar(request: Request):
+        """The owner's picture, cropped to a square. Checked like any upload."""
+        img = _image(await request.body())
+        owner_profile.set_avatar(team.ws, team.media_dir, img,
+                                 team.account.day if team.account else None)
+        return {"ok": True, **_owner()}
+
+    @app.delete("/api/owner/avatar")
+    async def clear_owner_avatar():
+        owner_profile.set_avatar(team.ws, team.media_dir, None,
+                                 team.account.day if team.account else None)
+        return {"ok": True, **_owner()}
 
     @app.get("/api/stream")
     async def stream():
@@ -730,22 +787,7 @@ def create_app(team: Team, web_dist: str | Path | None = None, seed_days: int | 
         import io
         import re
 
-        from PIL import Image, UnidentifiedImageError
-
-        body = await request.body()
-        if not body:
-            raise HTTPException(400, "Empty upload")
-        if len(body) > MAX_UPLOAD:
-            raise HTTPException(413, "Images up to 5 MB")
-        try:
-            img = Image.open(io.BytesIO(body))
-            if img.format not in ("PNG", "JPEG"):
-                raise HTTPException(415, "PNG or JPEG only")
-            if img.width * img.height > 40_000_000:
-                raise HTTPException(413, "Image too large")
-            img.load()
-        except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
-            raise HTTPException(415, "Not an image") from exc
+        img = _image(await request.body())
         img = img.convert("RGBA" if img.mode in ("RGBA", "LA", "P") else "RGB")
         out = io.BytesIO()
         img.save(out, "PNG")

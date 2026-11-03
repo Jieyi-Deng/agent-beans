@@ -2,6 +2,7 @@
 // the team works from, what the models cost, and the controls that move the simulated week forward.
 import { Fragment, useState, type ReactNode } from "react";
 import { Connection, FactsForm, HouseRulesForm } from "./Access";
+import { ProfileForm } from "./Profile";
 import { api, money, onDay, useData, type AccessData, type SettingsData } from "./api";
 import type { Route } from "./route";
 import { Av } from "./ui";
@@ -26,11 +27,12 @@ const SECTIONS = [
   { key: "facts", label: "Business facts" },
   { key: "models", label: "Models and spend" },
   { key: "simulation", label: "Simulation" },
+  { key: "profile", label: "Your profile" },
 ] as const;
 
-export default function Settings({ tick, busy, sidebar, route, access, onAccess }: {
+export default function Settings({ tick, busy, sidebar, route, access, onAccess, named }: {
   tick: number; busy: string | null; sidebar: ReactNode; route: Route;
-  access: AccessData | null; onAccess: () => void;
+  access: AccessData | null; onAccess: () => void; named: boolean;
 }) {
   const { data } = useData(api.settings, [tick]);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +58,7 @@ export default function Settings({ tick, busy, sidebar, route, access, onAccess 
           </nav>
           <div className="col grow" style={{ gap: 16, minWidth: 0, maxWidth: 860 }}>
             {s === "connection" && access && <Connection a={access} onChange={onAccess} />}
+            {s === "profile" && <ProfileForm named={named} />}
             {s === "rules" && access && (
               <section className="section">
                 <div className="h2">House rules and budget caps</div>

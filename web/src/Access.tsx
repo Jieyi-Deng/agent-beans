@@ -5,7 +5,8 @@
 import { useEffect, useState } from "react";
 import { api, date, money, type AccessData, type Account, type FactsPatch, type Reads, type Rules, type RulesPatch } from "./api";
 import { go } from "./route";
-import { OWNER } from "./ui";
+import { ProfileFields, useProfileDraft } from "./Profile";
+import { owner } from "./ui";
 
 function useAct(onDone: () => void) {
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +38,7 @@ export function Connection({ a, onChange }: { a: AccessData; onChange: () => voi
             </div>
             <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>
               {real ? "Meta ad account. Data stays on this machine." : "Sandbox connection, synthetic data."}{" "}
-              Connected by {c.by === "user" ? OWNER : c.by} on {date(c.ts)} · {c.currency} · {c.timezone}
+              Connected by {c.by === "user" ? owner() : c.by} on {date(c.ts)} · {c.currency} · {c.timezone}
             </div>
             {a.reads && (
               <div className="muted" style={{ fontSize: 12, marginTop: 3 }} title={Object.values(a.reads.notes).join("\n")}>
@@ -237,12 +238,13 @@ export function FactsForm({ facts, version, onChange }: {
 
 // ---------------------------------------------------------------- first-run wizard
 
-const STEPS = ["Ad account", "Pick account", "How much the team may do", "House rules"];
+const STEPS = ["You and the ad account", "Pick account", "How much the team may do", "House rules"];
 
-export function Wizard({ a, start, onClose, onDone }: {
-  a: AccessData; start: number; onClose: () => void; onDone: () => void;
+export function Wizard({ a, named, start, onClose, onDone }: {
+  a: AccessData; named: boolean; start: number; onClose: () => void; onDone: () => void;
 }) {
   const [step, setStep] = useState(start);
+  const you = useProfileDraft(named);
   const [kind, setKind] = useState<"sandbox" | "meta">(start > 0 && a.meta_accounts.length ? "meta" : "sandbox");
   const [acct, setAcct] = useState<Account | null>(
     kind === "meta" ? a.meta_accounts[0] ?? null : a.sandbox);
@@ -256,7 +258,8 @@ export function Wizard({ a, start, onClose, onDone }: {
     setAcct(k === "sandbox" ? a.sandbox : a.meta_accounts[0] ?? null);
     setLevel(k === "sandbox" ? 2 : 1);
   };
-  const next = () => {
+  const next = async () => {
+    if (step === 0 && you.dirty && !(await you.save())) return; // the name is saved first
     if (step === 0 && kind === "meta" && !a.meta_accounts.length) {
       window.location.href = "/api/meta/login"; // Facebook Login for Business on facebook.com
       return;
@@ -284,6 +287,7 @@ export function Wizard({ a, start, onClose, onDone }: {
         </div>
 
         {step === 0 && (<>
+          <ProfileFields d={you} autoFocus={!named} />
           <div><div className="h2" id="wiz-h">Which ad account should the team work on?</div>
             <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>The team reads results every morning and proposes changes. You approve everything that spends money.</div></div>
           <div className="col" style={{ gap: 10 }}>
@@ -358,7 +362,8 @@ export function Wizard({ a, start, onClose, onDone }: {
             <button className="btn ghost" disabled={busy} onClick={() => (step === 0 ? onClose() : setStep(step - 1))}>
               {step === 0 ? "Not now" : "Back"}</button>
             {step < 3
-              ? <button className="btn pri" disabled={!acct && step > 0} onClick={next}>
+              ? <button className="btn pri" disabled={(!acct && step > 0) || (step === 0 && (!you.clean || you.saving))}
+                        onClick={next}>
                   {step === 0 ? (kind === "sandbox" ? "Continue with the sandbox" : "Continue to facebook.com") : "Continue"}</button>
               : <button className="btn pri" disabled={busy} onClick={finish}>Start the team</button>}
           </div>

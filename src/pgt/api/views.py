@@ -8,12 +8,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from functools import partial
 
+from pgt.harness import owner as owner_profile
 from pgt.harness.artifacts import ArtifactRecord
 from pgt.harness.events import Event
 from pgt.harness.workspace import Workspace
-
-OWNER = "Jieyi"
 
 # role id -> (avatar code, role name, persona name)
 ROLES: dict[str, tuple[str | None, str, str]] = {
@@ -24,7 +24,7 @@ ROLES: dict[str, tuple[str | None, str, str]] = {
     "reviewer": ("RV", "Reviewer", "Philly"),
     "media_buyer": ("MB", "Media Buyer", "Dial"),
     "operator": ("OP", "Operator", "Bolt"),
-    "user": ("YOU", OWNER, OWNER),
+    "user": ("YOU", owner_profile.DEFAULT, owner_profile.DEFAULT),  # named per workspace
     "system": (None, "System", "System"),
     "policy": (None, "House rules", "House rules"),
 }
@@ -42,12 +42,15 @@ TYPES = {
 HIDDEN = {
     "model.call", "model.cost", "tool.call", "context.assembled", "evidence.added",
     "loop.finished", "loop.stage", "artifact.status", "approval.simulated",
-    "approval.voided", "media.call",
+    "approval.voided", "media.call", owner_profile.EVENT,
 }
 
 
-def role(actor: str) -> dict:
+def role(actor: str, owner: str | None = None) -> dict:
+    """Who an actor is on the page. The owner ("user") shows under `owner`, their own name."""
     code, name, persona = ROLES.get(actor, (None, actor.replace("_", " ").title(), actor))
+    if actor == "user" and owner:
+        name = persona = owner
     return {"actor": actor, "code": code, "name": name, "persona": persona}
 
 
@@ -121,6 +124,7 @@ class Index:
     models: dict[tuple[str | None, str], list[str]] = field(default_factory=dict)  # (loop, role)
     spend: dict[tuple[str | None, str], float] = field(default_factory=dict)  # (loop, role)
     start: date | None = None  # the calendar date of Day 1
+    owner: str = owner_profile.DEFAULT  # the owner's name, as the pages show it
 
     @classmethod
     def build(cls, ws: Workspace) -> Index:
@@ -145,6 +149,8 @@ class Index:
                 idx.applied[e.refs[0]] = e
             elif e.type == "approval.returned":
                 idx.returned[p["key"]] = e
+            elif e.type == owner_profile.EVENT:
+                idx.owner = p.get("name") or owner_profile.DEFAULT
             elif e.type == "model.call":
                 at = (e.loop_id, p["role"])
                 idx.spend[at] = idx.spend.get(at, 0.0) + p.get("cost", 0.0)  # failed calls cost too
@@ -236,7 +242,7 @@ def deliverable(ws: Workspace, idx: Index, record: ArtifactRecord, names: dict[s
         "tab": TYPES[record.kind][1],
         "title": title(record, idx.start),
         "sub": subtitle(ws, record, names),
-        "from": role(record.author),
+        "from": role(record.author, idx.owner),
         "status": cls,
         "status_label": label,
         "updated": pub.ts if pub else None,
@@ -260,9 +266,11 @@ def deliverables(ws: Workspace, account=None, idx: Index | None = None) -> list[
 # ---------------------------------------------------------------- room
 
 
-def _msg(e: Event, actor: str, text: str, mention: bool = False, card: dict | None = None) -> dict:
-    return {"kind": "msg", "id": e.id, "ts": e.ts, "sim_day": e.sim_day, "who": role(actor),
-            "text": (f"@{OWNER} " if mention else "") + text, "mention": mention,
+def _msg(e: Event, actor: str, text: str, mention: bool = False, card: dict | None = None,
+         owner: str = owner_profile.DEFAULT) -> dict:
+    return {"kind": "msg", "id": e.id, "ts": e.ts, "sim_day": e.sim_day,
+            "who": role(actor, owner),
+            "text": (f"@{owner} " if mention else "") + text, "mention": mention,
             "card": card, "replies": [], "loop_id": e.loop_id}
 
 
@@ -271,7 +279,8 @@ def _card(ws: Workspace, idx: Index, record: ArtifactRecord, names: dict[str, st
     note = ""
     if d["status"] == "ok":
         g = idx.valid_grant(record)
-        note = "Approved by the simulated owner" if g.id in idx.simulated else f"Approved by {OWNER}"
+        note = ("Approved by the simulated owner" if g.id in idx.simulated
+                else f"Approved by {idx.owner}")
         d["approved_ts"] = g.ts
     elif d["status"] == "applied":
         r = idx.applied[record.artifact_id].payload
@@ -331,12 +340,13 @@ def _fold_line(ws: Workspace, e: Event) -> tuple[str, str] | None:
     return None
 
 
-def _fold(lines: list[dict], loop_id: str | None, start: date | None = None) -> dict:
+def _fold(lines: list[dict], loop_id: str | None, start: date | None = None,
+          owner: str = owner_profile.DEFAULT) -> dict:
     actors: list[str] = []
     for line in lines:
         if line["who"]["actor"] not in actors and line["who"]["code"]:
             actors.append(line["who"]["actor"])
-    names = [role(a)["name"] for a in actors]
+    names = [role(a, owner)["name"] for a in actors]
     if loop_id and loop_id.startswith("daily-d"):
         tail = f"prepared the {on_day(start, loop_id[7:])} check"
     elif loop_id and loop_id.startswith("weekly-w"):
@@ -351,7 +361,7 @@ def _fold(lines: list[dict], loop_id: str | None, start: date | None = None) -> 
         tail = f"posted {_plural(len(lines), 'update')}"
     return {"kind": "fold", "id": lines[0]["id"], "loop_id": loop_id,
             "ids": [line["id"] for line in lines],
-            "actors": [role(a) for a in actors], "names": names, "tail": tail,
+            "actors": [role(a, owner) for a in actors], "names": names, "tail": tail,
             "ts_from": lines[0]["ts"], "ts_to": lines[-1]["ts"], "sim_day": lines[0]["sim_day"],
             "items": lines}
 
@@ -436,11 +446,12 @@ def room(ws: Workspace, account=None, idx: Index | None = None) -> list[dict]:
     fold: list[dict] = []
     fold_loop: str | None = None
     connected_at = -2
+    msg = partial(_msg, owner=idx.owner)
 
     def flush():
         nonlocal fold
         if fold:
-            items.append(_fold(fold, fold[0]["loop"] or fold_loop, idx.start))
+            items.append(_fold(fold, fold[0]["loop"] or fold_loop, idx.start, idx.owner))
             fold = []
 
     def add(item: dict):
@@ -449,9 +460,9 @@ def room(ws: Workspace, account=None, idx: Index | None = None) -> list[dict]:
         by_id[item["id"]] = item
 
     def reply(root: dict | None, e: Event, actor: str, text: str):
-        r = {"id": e.id, "ts": e.ts, "who": role(actor), "text": text}
+        r = {"id": e.id, "ts": e.ts, "who": role(actor, idx.owner), "text": text}
         if root is None:
-            add(_msg(e, actor, text))
+            add(msg(e, actor, text))
         else:
             root["replies"].append(r)
 
@@ -481,7 +492,7 @@ def room(ws: Workspace, account=None, idx: Index | None = None) -> list[dict]:
                 card = None
                 if cs is not None and not is_empty_change_set(cs):
                     card = _card(ws, idx, cs, names)
-                add(_msg(e, record.author, text, card=card))
+                add(msg(e, record.author, text, card=card))
                 continue
         if e.type == "approval.requested":
             record = ws.artifacts.get(e.refs[0]) if e.refs else ws.artifacts.latest(p["key"])
@@ -493,10 +504,10 @@ def room(ws: Workspace, account=None, idx: Index | None = None) -> list[dict]:
             text += record.content.get("summary") or subtitle(ws, record, names)
             if record.kind == "ChangeSet":
                 text += " Nothing reaches the account until you approve."
-            msg = _msg(e, record.author, text.strip(), mention=True,
-                       card=_card(ws, idx, record, names))
-            add(msg)
-            roots[p["key"]] = msg
+            root_msg = msg(e, record.author, text.strip(), mention=True,
+                           card=_card(ws, idx, record, names))
+            add(root_msg)
+            roots[p["key"]] = root_msg
             continue
         if e.type == "approval.granted":
             record = ws.artifacts.get(e.refs[0]) if e.refs else None
@@ -506,7 +517,7 @@ def room(ws: Workspace, account=None, idx: Index | None = None) -> list[dict]:
                 text = (f"Simulated approval: approved {_plural(n, 'change')} in {name}, only "
                         "the ones the house rules allowed.") if n else \
                     f"Simulated approval: approved {name}."
-                add(_msg(e, "system", text))
+                add(msg(e, "system", text))
             else:
                 reply(roots.get(p["key"]), e, "user", f"Approved {name}.")
             continue
@@ -525,22 +536,22 @@ def room(ws: Workspace, account=None, idx: Index | None = None) -> list[dict]:
                 text = f"Applied {_plural(len(p.get('applied', [])), 'change')} to the sandbox."
                 if p.get("skipped"):
                     text += f" Skipped {_plural(len(p['skipped']), 'change')}."
-            add(_msg(e, "operator", text, card=_card(ws, idx, record, names) if record else None))
+            add(msg(e, "operator", text, card=_card(ws, idx, record, names) if record else None))
             continue
         if e.type == "changeset.refused":
-            add(_msg(e, "operator", p.get("reason") or "Refused to apply without a valid approval."))
+            add(msg(e, "operator", p.get("reason") or "Refused to apply without a valid approval."))
             continue
         if e.type == "escalation.raised":
-            add(_msg(e, e.actor, p.get("reason", ""), mention=True))
+            add(msg(e, e.actor, p.get("reason", ""), mention=True))
             continue
         if e.type == "message.posted":
             thread = p.get("thread")
-            text = (f"@{role(p['to'])['name']} " if p.get("to") else "") + p["text"]
+            text = (f"@{role(p['to'], idx.owner)['name']} " if p.get("to") else "") + p["text"]
             if thread and thread in by_id:
                 by_id[thread]["replies"].append(
-                    {"id": e.id, "ts": e.ts, "who": role(e.actor), "text": text})
+                    {"id": e.id, "ts": e.ts, "who": role(e.actor, idx.owner), "text": text})
             else:
-                add(_msg(e, e.actor, text))
+                add(msg(e, e.actor, text))
             continue
         if e.type == "account.connected":  # a line across the room, with the level set with it
             flush()
@@ -553,7 +564,7 @@ def room(ws: Workspace, account=None, idx: Index | None = None) -> list[dict]:
         if e.type in SETTING_EVENTS:
             said = _setting(ws, idx, e, names)
             if said is not None:
-                add(_msg(e, said[0], said[1], card=said[2]))
+                add(msg(e, said[0], said[1], card=said[2]))
             continue
         line = _fold_line(ws, e)
         if line is None:
@@ -562,7 +573,7 @@ def room(ws: Workspace, account=None, idx: Index | None = None) -> list[dict]:
             flush()
         fold.append({"id": e.id, "ts": e.ts, "sim_day": e.sim_day, "type": e.type,
                      "loop": e.loop_id,
-                     "who": role(line[0]), "text": line[1]})
+                     "who": role(line[0], idx.owner), "text": line[1]})
     flush()
     # Each role's spend in a loop shows once: on its own message if it posted one, else on the
     # first fold it appears in.

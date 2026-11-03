@@ -128,6 +128,16 @@ a:hover { color: #0047cc; text-decoration: underline; }
 .av { width: 32px; height: 32px; border-radius: 8px; flex: none; display: block; object-fit: cover; }
 .av.sm { width: 24px; height: 24px; border-radius: 6px; }
 .av.lg { width: 120px; height: 120px; border-radius: 26px; }
+/* The owner without a picture: their initials on the warm colour their @mentions use. */
+.av.ini { display: grid; place-items: center; background: var(--signal-pale); color: var(--signal-ink); box-shadow: inset 0 0 0 1px oklch(0.88 0.05 60); font: 600 12px var(--ui); letter-spacing: .02em; user-select: none; }
+.av.sm.ini { font-size: 9.5px; }
+.av.lg.ini { font-size: 42px; }
+.you-card { display: flex; gap: 18px; align-items: flex-start; padding: 14px; border: 1px solid var(--rule); border-radius: 8px; background: var(--paper); }
+.you-card .av.lg { width: 88px; height: 88px; border-radius: 20px; }
+.you-card .av.lg.ini { font-size: 32px; }
+.you-l { font: 500 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+.you-in { font: 500 14px var(--ui); color: var(--ink); padding: 7px 10px; border: 1px solid var(--rule-strong); border-radius: 4px; background: var(--surface); outline: 0; max-width: 340px; }
+.you-in:focus { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue); }
 .av-stack { display: flex; flex: none; }
 .av-stack .av + .av { margin-left: -7px; box-shadow: 0 0 0 2px var(--sunken); }
 .msg2 { display: grid; grid-template-columns: 32px minmax(0,1fr); gap: 12px; padding: 12px 0; }

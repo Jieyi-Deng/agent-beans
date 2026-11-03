@@ -4,7 +4,7 @@
 import { Fragment, useRef, useState, type ReactNode } from "react";
 import { api, clock, REPLAY, useData, type Asset, type Mode } from "./api";
 import { go, type Route } from "./route";
-import { OWNER } from "./ui";
+import { owner } from "./ui";
 
 const FILTERS = [
   { key: "all", label: "All" },
@@ -144,7 +144,7 @@ function Side({ a, mode }: { a: Asset; mode?: Mode }) {
         </div>
       )}
       {a.kind === "upload" && <div className="muted" style={{ fontSize: 12 }}>
-        Uploaded by {OWNER}. Checked as an image and saved as PNG. The team asks before putting it in an ad.</div>}
+        Uploaded by {owner()}. Checked as an image and saved as PNG. The team asks before putting it in an ad.</div>}
       <dl className="kv rule-t" style={{ paddingTop: 12, margin: 0 }}>
         {a.facts.map(([k, v]) => <Fragment key={k}><dt>{k}</dt><dd>{v}</dd></Fragment>)}
         {a.used_in && <><dt>Used in</dt><dd><a href={`#/deliverables/${a.used_in.key}`}>{a.used_in.title}</a></dd></>}

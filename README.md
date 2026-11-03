@@ -4,7 +4,7 @@ An always-on AI growth team for Meta ads, built on Meta's Muse models for the Me
 
 Agent Beans checks your ad account every day, plans and makes new ads every week, and never changes anything without your approval. Every number it shows traces back to the source data.
 
-**Live demo:** [pallas-ads.github.io/pallas-growth](https://pallas-ads.github.io/pallas-growth/), the project homepage with read-only recordings of two live runs on synthetic sandbox accounts: Northpaw Supply, a pet-supplies store (14 daily checks and one weekly review with three new ads, $1.14 of model calls), and Beans' Active, a fitness app with no ad history ($0.96).
+**Live demo:** [pallas-ads.github.io/pallas-growth](https://pallas-ads.github.io/pallas-growth/), the project homepage with read-only recordings of two live runs on synthetic sandbox accounts: Northpaw Supply, a pet-supplies store (14 daily checks and one weekly review with three new ads, $1.14 of model calls), and Beans' Active, a fitness app with no ad history ($1.28).
 
 ## How it works
 
@@ -30,7 +30,7 @@ cd web && npm install && npm run build && cd ..
 uv run pgt serve --template ecommerce
 ```
 
-Open http://127.0.0.1:8000. Without `--live` the team runs on an offline model against a synthetic sandbox account, so nothing costs money.
+Open http://127.0.0.1:8000. Without `--live` the team runs on an offline model against a synthetic sandbox account, so nothing costs money. The first screen asks for your name, which the team uses to mention you, and an optional photo (your initials otherwise); both stay in the workspace, never in a prompt, and can be changed in Settings or set with `--owner NAME --owner-avatar PHOTO`.
 
 To run on Muse, copy `.env.example` to `.env`, fill in the keys, and add a spend cap:
 

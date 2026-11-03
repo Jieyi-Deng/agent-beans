@@ -84,6 +84,10 @@ def main(argv: list[str] | None = None) -> None:
         "--cap", type=float, default=5.0,
         help="Live runs stop before any call once this many dollars are spent (list price)",
     )
+    serve.add_argument("--owner", default=None,
+                       help="The owner's name, as the app shows it (also set on first run)")
+    serve.add_argument("--owner-avatar", default=None,
+                       help="PNG or JPEG for the owner's picture (default: their initials)")
     rep = sub.add_parser("replay", help="Record a running team as a static, read-only site")
     rep.add_argument("--source", default="http://127.0.0.1:8000", help="The running pgt serve")
     rep.add_argument("--out", default="replay", help="Folder for data/ and media/")
@@ -188,6 +192,8 @@ def _serve(args) -> None:
         print("Offline demo: a rule-based stand-in answers instead of Muse (no cost).")
     team.public = args.public
     team.template = args.template
+    if args.owner or args.owner_avatar:
+        _set_owner(team, args.owner, args.owner_avatar)
     cert = args.ssl_certfile or os.environ.get("PGT_TLS_CERT") or None
     key = args.ssl_keyfile or os.environ.get("PGT_TLS_KEY") or None
     if bool(cert) != bool(key):
@@ -200,6 +206,25 @@ def _serve(args) -> None:
     days = 0 if args.cold else 7 * TEMPLATES[args.template].history_weeks
     uvicorn.run(create_app(team, args.web, seed_days=days), host=args.host, port=args.port,
                 log_level="warning", ssl_certfile=cert, ssl_keyfile=key)
+
+
+def _set_owner(team, name: str | None, picture: str | None) -> None:
+    from PIL import Image
+
+    from pgt.harness import owner
+
+    day = team.account.day if team.account else None
+    try:
+        if name:
+            owner.set_name(team.ws, name, day)
+        if picture:
+            with Image.open(picture) as img:
+                img.load()
+                owner.set_avatar(team.ws, team.media_dir, img, day)
+    except (owner.ProfileError, OSError) as exc:
+        raise SystemExit(f"--owner: {exc}") from exc
+    print(f"Owner: {owner.name(team.ws)}"
+          + (", with their picture" if owner.profile(team.ws)["avatar"] else ""))
 
 
 def _ask(question: str, yes: bool) -> bool:

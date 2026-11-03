@@ -4,10 +4,50 @@ import { avatar } from "./avatars";
 import type { Card, Status, Who } from "./api";
 import { go } from "./route";
 
-export const OWNER = "Jieyi";
+let ownerName = "Owner";
+let ownerPicture: string | null = null;
 
-export function Av({ who, size }: { who: Who | { code: string | null; name: string }; size?: "sm" }) {
-  return <img className={size ? "av " + size : "av"} src={avatar(who.code)} alt={who.name} />;
+/** Sets the owner's name and picture from the status, like setDayOne. */
+export function setOwner(name: string | undefined, picture: string | null | undefined) {
+  if (name) ownerName = name;
+  ownerPicture = picture ?? null;
+}
+
+/** The name the owner gave, "Owner" until they give one. */
+export function owner(): string {
+  return ownerName;
+}
+
+/** The owner's saved picture, or null when the app draws their initials. */
+export function ownerAvatar(): string | null {
+  return ownerPicture;
+}
+
+/** "Rosa Martinez" -> "RM", "Jieyi" -> "J". */
+export function initials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return "?";
+  const first = Array.from(words[0])[0];
+  const last = words.length > 1 ? Array.from(words[words.length - 1])[0] : "";
+  return (first + last).toUpperCase();
+}
+
+type Person = Who | { code: string | null; name: string };
+
+export function Av({ who, size }: { who: Person; size?: "sm" | "lg" }) {
+  const cls = size ? "av " + size : "av";
+  if (who.code === "YOU") return <OwnerAv size={size} />;
+  return <img className={cls} src={avatar(who.code)} alt={who.name} />;
+}
+
+/** The owner's picture, or their initials when they have none. `picture` and `name` override the
+ *  saved ones, for a preview before saving. */
+export function OwnerAv({ size, name, picture }: { size?: "sm" | "lg"; name?: string; picture?: string | null }) {
+  const cls = size ? "av " + size : "av";
+  const who = name ?? ownerName;
+  const src = picture === undefined ? ownerPicture : picture;
+  if (src) return <img className={cls} src={src} alt={who} />;
+  return <span className={cls + " ini"} role="img" aria-label={who}>{initials(who || "?")}</span>;
 }
 
 export function Stack({ people }: { people: { code: string | null; name: string }[] }) {
@@ -30,12 +70,14 @@ export function Lbl({ status, label }: { status: Status; label: string }) {
 /** Message text with leading @mentions marked; the owner's in the warm colour. */
 export function Text({ text }: { text: string }) {
   const parts: ReactNode[] = [];
-  const re = /@(Jieyi|Growth Lead|Analyst|Creative Strategist|Creative Producer|Reviewer|Media Buyer|Operator)\b/g;
+  const names = [ownerName, "Growth Lead", "Analyst", "Creative Strategist", "Creative Producer",
+                 "Reviewer", "Media Buyer", "Operator"].map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const re = new RegExp(`@(${names.join("|")})(?![\\p{L}\\p{N}_])`, "gu");
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
     if (m.index > last) parts.push(text.slice(last, m.index));
-    parts.push(<span key={m.index} className={m[1] === OWNER ? "mention you" : "mention"}>@{m[1]}</span>);
+    parts.push(<span key={m.index} className={m[1] === ownerName ? "mention you" : "mention"}>@{m[1]}</span>);
     last = m.index + m[0].length;
   }
   parts.push(text.slice(last));

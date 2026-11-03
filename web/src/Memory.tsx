@@ -9,7 +9,7 @@ import {
 } from "./api";
 import { roleWho } from "./Harness";
 import { go, type Route } from "./route";
-import { Av, OWNER } from "./ui";
+import { Av, owner } from "./ui";
 
 const ROLES = ["growth_lead", "analyst", "media_buyer", "producer", "reviewer", "strategist"];
 const TABS = [
@@ -52,7 +52,7 @@ function LineRow({ line, store, role, act, busy }: {
         <div className="mline-m">
           <span className="mono faint">{line.id}</span>
           <span className={cls}>{label}</span>
-          {line.locked && <span className="lbl wait" title="Your line: a role can only propose a change to it">{OWNER}'s</span>}
+          {line.locked && <span className="lbl wait" title="Your line: a role can only propose a change to it">{owner()}'s</span>}
           {!line.locked && line.author !== "system" && <span className="faint">by {roleWho(line.author).name}</span>}
           {line.created_week != null && <span className="faint">week {line.created_week}{line.last_confirmed_week && line.last_confirmed_week !== line.created_week ? `, confirmed week ${line.last_confirmed_week}` : ""}</span>}
           <Sources ids={line.sources} />
@@ -220,7 +220,7 @@ function Weeks({ m }: { m: MemoryData }) {
 
 function route(n: Note): string {
   const hops = n.routed.map((r) => roleWho(r.to).name);
-  return [OWNER, ...hops].join(" → ");
+  return [owner(), ...hops].join(" → ");
 }
 
 function Notes({ notes }: { notes: Note[] }) {
