@@ -9,6 +9,10 @@ repair ran.
   whitespace and gets its open brackets closed. A cut inside a value is left alone.
 - JSON cut off inside `note_to_self`, the last field and never part of the deliverable: the
   note is trimmed and the JSON closed. A cut anywhere else is left alone.
+- JSON with raw control characters (tabs, newlines) inside its strings, which strict JSON
+  forbids (seen live: a lessons pass padded its strings with tabs and failed three times): the
+  characters are escaped, so each string keeps what it held. Runs before the two repairs above,
+  which a cut-off answer may still need.
 - A teammate's answer written as plain sentences, not as the Answer object (seen live: the
   Analyst used its recall tools, then wrote the answer as text). The text becomes `answer` and
   the evidence IDs it cites become `evidence_ids`; code then checks those IDs and numbers as
@@ -35,6 +39,8 @@ _PARAM = re.compile(rf'<{_NS}parameter\s+name="([^"]+)"\s*>(.*?)</{_NS}parameter
 _WRAPPER = re.compile(rf"</?{_NS}function_calls>")
 _NOTE = re.compile(r'"note_to_self"\s*:\s*"')
 _TAIL_ESCAPE = re.compile(r"(\\+)(u[0-9a-fA-F]{0,3})?$")
+_JSON_START = re.compile(r"\s*(?:```(?:json)?[ \t]*\n\s*)?(?=[\[{])")  # optionally fenced
+_ESCAPES = {"\b": "\\b", "\f": "\\f", "\n": "\\n", "\r": "\\r", "\t": "\\t"}
 
 
 def _value(raw: str, schema: dict):
@@ -142,6 +148,40 @@ def close_cut_note(text: str) -> str | None:
     return candidate if _parses(candidate) else None
 
 
+def escape_control_chars(text: str) -> str | None:
+    """JSON (fenced or not) with raw control characters inside its strings: the same text with
+    them escaped (a tab becomes \\t). Whitespace between values, and anything after the JSON,
+    stays as it is. None when the text does not start like JSON or has no such character."""
+    start = _JSON_START.match(text)
+    if start is None:
+        return None
+    out = [text[:start.end()]]
+    depth, in_string, escaped, changed = 0, False, False, False
+    for i in range(start.end(), len(text)):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            elif ch < " ":
+                ch = _ESCAPES.get(ch) or f"\\u{ord(ch):04x}"
+                changed = True
+        elif ch == '"':
+            in_string = True
+        elif ch in "[{":
+            depth += 1
+        elif ch in "]}":
+            depth -= 1
+            if depth == 0:
+                out.append(text[i:])
+                break
+        out.append(ch)
+    return "".join(out) if changed else None
+
+
 ANSWER_FIELDS = {"answer", "evidence_ids", "note_to_self"}
 
 
@@ -161,6 +201,22 @@ def answer_in_text(response: ModelResponse, tools: dict[str, dict]) -> ToolCallP
         "note_to_self": ""}, tool_call_id=f"text_{uuid.uuid4().hex[:12]}")
 
 
+CUTS = (("cut_json", close_cut_json), ("cut_note", close_cut_note))
+
+
+def _fix_json(text: str, ran: list[str], cuts=CUTS) -> str:
+    """`text` with control characters escaped, then the first of `cuts` that applies. The
+    names of the repairs that ran are added to `ran`."""
+    if (escaped := escape_control_chars(text)) is not None:
+        ran.append("control_chars")
+        text = escaped
+    for name, fix in cuts:
+        if (fixed := fix(text)) is not None:
+            ran.append(name)
+            return fixed
+    return text
+
+
 def repair(response: ModelResponse, tools: dict[str, dict]) -> tuple[ModelResponse, list[str]]:
     """The response with the repairs applied, and which ones ran."""
     if (call := answer_in_text(response, tools)) is not None:
@@ -176,15 +232,13 @@ def repair(response: ModelResponse, tools: dict[str, dict]) -> tuple[ModelRespon
                     parts.append(replace(part, content=rest))
                 parts.extend(calls)
                 continue
-            for name, fix in (("cut_json", close_cut_json), ("cut_note", close_cut_note)):
-                if (fixed := fix(part.content)) is not None:
-                    ran.append(name)
-                    part = replace(part, content=fixed)
-                    break
+            content = _fix_json(part.content, ran)
+            if content != part.content:
+                part = replace(part, content=content)
         elif isinstance(part, ToolCallPart) and isinstance(part.args, str):
-            if (fixed := close_cut_note(part.args)) is not None:
-                ran.append("cut_note")
-                part = replace(part, args=fixed)
+            args = _fix_json(part.args, ran, CUTS[1:])
+            if args != part.args:
+                part = replace(part, args=args)
         parts.append(part)
     if not ran:
         return response, []
