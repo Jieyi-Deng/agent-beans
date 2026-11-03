@@ -69,7 +69,7 @@ def test_day_one_is_the_day_after_the_sandbox_connects():
 def test_room_mentions_owner_and_folds_handoffs(client):
     items = client.get("/api/room").json()["items"]
     mentions = [i for i in items if i["kind"] == "msg" and i["mention"]]
-    assert mentions and mentions[-1]["text"].startswith("@Jieyi ")
+    assert mentions and mentions[-1]["text"].startswith("@Owner ")  # until the owner gives a name
     assert mentions[-1]["card"]["status"] == "wait"
     assert any(i["kind"] == "fold" and i["tail"] == "worked on the Week 1 review" for i in items)
     simulated = [i for i in items if i["kind"] == "msg" and i["who"]["actor"] == "system"]
@@ -217,7 +217,7 @@ def test_assets_trace_each_creative_and_launch(client):
     assert {a["status_label"] for a in made} == {"Created paused"}
     assert all(dict(a["facts"])["Ad"].startswith("ad_") for a in made)
     ops = client.get("/api/dashboard").json()["actions"]
-    assert "created 2 paused ads" in ops[-1]["text"].lower() and "Jieyi approved" in ops[-1]["text"]
+    assert "created 2 paused ads" in ops[-1]["text"].lower() and "Owner approved" in ops[-1]["text"]
 
 
 def test_upload_accepts_images_only(client):

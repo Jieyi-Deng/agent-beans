@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from pgt.api.views import OWNER, Index, _media_url, period, provider, role, title
+from pgt.api.views import Index, _media_url, period, provider, role, title
 from pgt.harness.workspace import Workspace
 from pgt.llm.meta import IMAGE_MODEL, SAM_MODEL
 from pgt.loops.weekly import shot_file
@@ -182,7 +182,7 @@ def _actions(ws: Workspace, account, idx: Index, start: int, end: int) -> list[d
         if not parts:
             continue
         grants = [g for g in idx.grants.get(rec.key, []) if g.id < e.id]
-        by = "the simulated owner" if grants and grants[-1].id in idx.simulated else OWNER
+        by = "the simulated owner" if grants and grants[-1].id in idx.simulated else idx.owner
         evidence = sorted({i for ch in changes for i in ch.get("evidence_ids", [])})
         text = "; ".join(parts)
         out.append({"day": e.sim_day, "who": role("operator"), "verb": "",
@@ -459,7 +459,7 @@ def _made(ws, idx, account, media_dir, record, plans, facts) -> dict:
         p = e.payload
         if e.type == "approval.returned":
             steps.append({"title": "Owner sent the new ads back", "sub": p.get("note", ""),
-                          "model": None, "final": False, "by": OWNER})
+                          "model": None, "final": False, "by": idx.owner})
         elif str(p.get("subject", "")).startswith(f"{test_id}-c"):
             steps.append({"title": f"Sent back draft {p.get('attempt', '')}".strip(),
                           "sub": "; ".join(p.get("issues", [])), "model": None, "final": False,
@@ -547,7 +547,7 @@ def assets(ws: Workspace, account, media_dir: str) -> dict:
         p = e.payload
         items.append({
             "id": f"upload/{p['file']}", "kind": "upload", "title": p["name"],
-            "hook": f"Uploaded by {OWNER}. The team asks before using it in an ad.",
+            "hook": f"Uploaded by {idx.owner}. The team asks before using it in an ad.",
             "test_id": None, "week": None, "status": "src", "status_label": "Uploaded",
             "image": _media_url(p["path"], media_dir), "images": [], "models": [],
             "after": f"{p['width']} x {p['height']}", "bad": False, "steps": [],

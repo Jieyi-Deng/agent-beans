@@ -1,4 +1,5 @@
-// Bean crew v3: one picture per role, drawn for this project. The owner uses their own photo.
+// Bean crew v3: one picture per role, drawn for this project. The owner's picture, or their
+// initials, comes from the workspace (see Av in ui.tsx).
 const CODES = ["AN", "GL", "CS", "CP", "RV", "MB", "OP"] as const;
 export const TEAM: { code: string; name: string }[] = [
   { code: "AN", name: "Analyst" },
@@ -22,7 +23,6 @@ export const ADDRESSABLE: { actor: string; code: string; name: string; does: str
 ];
 
 export function avatar(code: string | null | undefined): string {
-  if (code === "YOU") return "owner.jpg";
   if (code && (CODES as readonly string[]).includes(code)) return `avatars/${code}.svg`;
   return "pallas-logo.png"; // System and house rules speak as the team itself.
 }

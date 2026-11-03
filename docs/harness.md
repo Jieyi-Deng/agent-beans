@@ -221,7 +221,7 @@ flowchart LR
     redo --> next
 ```
 
-A note reaches only the role it was routed to, in that role's next call, for up to 14 days. The Memory view shows where each note went (for example "Jieyi, Growth Lead, Media Buyer"), who has seen it and whether it is done.
+A note reaches only the role it was routed to, in that role's next call, for up to 14 days. The Memory view shows where each note went (for example "Rosa, Growth Lead, Media Buyer"), who has seen it and whether it is done.
 
 ## Keeping the feedback loop positive
 

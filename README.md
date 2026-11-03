@@ -30,7 +30,7 @@ cd web && npm install && npm run build && cd ..
 uv run pgt serve --template ecommerce
 ```
 
-Open http://127.0.0.1:8000. Without `--live` the team runs on an offline model against a synthetic sandbox account, so nothing costs money.
+Open http://127.0.0.1:8000. Without `--live` the team runs on an offline model against a synthetic sandbox account, so nothing costs money. The first screen asks for your name, which the team uses to mention you, and an optional photo (your initials otherwise); both stay in the workspace, never in a prompt, and can be changed in Settings or set with `--owner NAME --owner-avatar PHOTO`.
 
 To run on Muse, copy `.env.example` to `.env`, fill in the keys, and add a spend cap:
 
