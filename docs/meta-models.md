@@ -43,21 +43,21 @@ Muse Spark Open runs at a configurable reasoning effort (`--effort`, default `me
 
 ## What one live run cost
 
-The public demo is a recording of this run: the pet-supplies store, 14 days of daily checks and one full weekly review with three new ads. Costs are list-price estimates from each call's token counts, logged as the run happened.
+The public demo is a recording of this run: the pet-supplies store, 18 days of daily checks and two full weekly reviews, each with market research and three new ads. Costs are list-price estimates from each call's token counts, logged as the run happened.
 
 | Model | Role | Calls | Web searches | Cost (USD) |
 | --- | --- | --- | --- | --- |
-| Muse Spark Open | Analyst | 64 | | 0.4629 |
-| Muse Spark Open | Media Buyer | 27 | | 0.1460 |
-| Muse Spark Open | Creative Producer | 12 | | 0.0864 |
-| Muse Spark Open | Growth Lead | 4 | | 0.0534 |
-| Muse Spark Open | Reviewer | 3 | | 0.0238 |
-| Muse Spark 1.3 | Creative Strategist | 2 | 21 | 0.3339 |
-| Muse Image 1.0 | Creative Producer | 3 | | 0.0300 |
-| SAM 3.1 | Creative Producer | 2 | | 0.0050 |
-| **Total** | | **117** | **21** | **1.1414** |
+| Muse Spark Open | Analyst | 56 | | 0.4898 |
+| Muse Spark Open | Media Buyer | 37 | | 0.3054 |
+| Muse Spark Open | Creative Producer | 19 | | 0.2755 |
+| Muse Spark Open | Reviewer | 14 | | 0.2221 |
+| Muse Spark Open | Growth Lead | 10 | | 0.1191 |
+| Muse Spark 1.3 | Creative Strategist | 4 | 16 | 0.2225 |
+| Muse Image 1.0 | Creative Producer | 30 | | 0.3000 |
+| SAM 3.1 | Creative Producer | 34 | | 0.0850 |
+| **Total** | | **204** | **16** | **2.0195** |
 
-Two weeks of an always-on growth team for about a dollar. The 14 daily checks made 81 of the calls and cost $0.51 together, under four cents a day. The Week 1 review, from market research to three reviewed ads, cost $0.40. Planning Week 2 cost $0.23 so far; it is waiting on the owner's approval.
+Two and a half weeks of an always-on growth team for about two dollars. The 18 daily checks made 76 of the calls and cost $0.62 together, under four cents a day. The Week 1 review, from market research to three reviewed ads, cost $0.38. The Week 2 review cost $0.71: its three ads used more than twice as many images and product cutouts, and four drafts went back for a redo before they passed. Closing each week, when every role writes down what it learned, cost $0.30 for both weeks together. By day 18 a purchase cost $13.16, against the owner's goal of $16.
 
 ## How an ad is made
 
