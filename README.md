@@ -6,7 +6,7 @@ An always-on Meta ads growth team for small businesses and indie developers. Bui
 
 Six AI specialists check your ad account every day, then plan and make new ads each week. A seventh member, the Operator, applies the changes. The Operator is plain code and acts only on what you approved. Every number the team shows traces back to source data.
 
-**Live demo:** [pallas-ads.github.io/pallas-growth](https://pallas-ads.github.io/pallas-growth/). The homepage embeds read-only recordings of two live runs on synthetic sandbox accounts: Northpaw Supply, an online pet store, and Beans' Active, a new fitness app. Because it is the real app, you can click through the Team Room, deliverables, dashboard, and creative.
+**Live demo:** [pallas-ads.github.io/agent-beans](https://pallas-ads.github.io/agent-beans/). The homepage embeds read-only recordings of two live runs on synthetic sandbox accounts: Northpaw Supply, an online pet store, and Beans' Active, a new fitness app. Because it is the real app, you can click through the Team Room, deliverables, dashboard, and creative.
 
 ## The problem
 
@@ -85,7 +85,7 @@ The [harness guide](docs/harness.md) lists 19 guarantees, each with the code tha
 | Marketing API | Every write, and the reads the MCP cannot answer in full |
 | Facebook Login for Business | Connects an ad account with only the permissions the owner grants |
 
-Open-weight models make an always-on team affordable. In the recorded pet-store run, 14 daily checks cost $0.51 combined, or under four cents a day. The whole run, including a weekly review with market research and three new ads, cost $1.14 across 117 model calls. [Meta models and products](docs/meta-models.md) breaks down the cost per role and explains why Meta's models matter here.
+Open-weight models make an always-on team affordable. In the recorded pet-store run, 18 daily checks cost $0.62 combined, or under four cents a day. The whole run, including two weekly reviews with market research and six new ads, cost $2.02 across 204 model calls. [Meta models and products](docs/meta-models.md) breaks down the cost per role and explains why Meta's models matter here.
 
 ## Results
 
