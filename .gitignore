@@ -25,6 +25,7 @@ spike/out/
 node_modules/
 web/dist/
 web/dist-replay/
+/replay/
 
 # OS
 .DS_Store

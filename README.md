@@ -30,13 +30,13 @@ Agent Beans is built to close that gap: the team handles the daily and weekly wo
 | Analyst | Reads the account, writes findings and test readouts, answers teammates' questions | Muse Spark Open |
 | Media Buyer | Proposes budget and pause changes | Muse Spark Open |
 | Creative Strategist | Researches the market with web search; every claim links to its source | Muse Spark 1.3 with hosted web search |
-| Creative Producer | Writes the copy and composes each ad, one Producer per test, in parallel | Muse Spark Open, Muse Image 1.0, SAM 3.1 |
+| Creative Producer | Writes the copy and plans each ad's three scenes, one Producer per test, in parallel | Muse Spark Open, Muse Image 1.0, SAM 3.1 |
 | Reviewer | Checks every deliverable in code, then looks at the rendered ad | Code, then Muse Spark Open with the image |
 | Operator | The only part that writes to the ad account, and only what you approved | Code, no model |
 
 **Every day**, the team reviews yesterday's results. Code computes every derived number and stores it as evidence with an ID. The Analyst writes findings that cite that evidence, the Reviewer checks them, and the Media Buyer proposes changes based only on reviewed findings. A policy gate checks each change against your house rules. The daily brief then arrives in the Team Room, where you can approve all of it, approve part of it, or send it back with a note.
 
-**Every week**, the team creates new ads in three stages, separated by two approvals. The Growth Lead writes a test plan where each test names one product with a photo. Once you approve the plan, the Strategist researches the market, and one Producer per test writes copy and builds the ad: SAM 3.1 cuts your product out of your own photo, and Muse Image 1.0 paints the scene around it. The Reviewer checks each ad. Once you approve the change set, the Operator creates the new ads in a paused state. At the end of the week, each role turns its results into lessons for next time, and you can edit any of them.
+**Every week**, the team creates new ads in three stages, separated by two approvals. The Growth Lead writes a test plan where each test names one product with a photo. Once you approve the plan, the Strategist researches the market, and one Producer per test writes the copy and plans three scenes. Muse Image 1.0 renders each scene as a photograph with your product in it, using your own photo as the reference. SAM 3.1 finds the product in every scene, so code can set the words around it in three ad sizes and cut a 10-second video from the same shots. The Reviewer checks each ad in code, then compares every scene with your photo and sends back any ad where the product looks different. Once you approve the change set, the Operator creates the new ads in a paused state. At the end of the week, each role turns its results into lessons for next time, and you can edit any of them.
 
 You talk to the team in the Team Room. Owner notes go directly to the role they concern, and a role can ask one teammate a question when it needs one.
 
@@ -79,8 +79,8 @@ The [harness guide](docs/harness.md) lists 19 guarantees, each with the code tha
 | --- | --- |
 | Muse Spark Open (open weights, on Baseten) | Every daily role: Growth Lead, Analyst, Media Buyer, Creative Producer, and the Reviewer with the image attached |
 | Muse Spark 1.3 with hosted web search, on the Meta API | The Creative Strategist's market research, with a source URL for every claim |
-| Muse Image 1.0 | Ad backgrounds: a scene with no text and no product |
-| SAM 3.1 | Cuts the advertised product out of the owner's own photo, so the ad shows the real product |
+| Muse Image 1.0 | Ad scenes: photographs with the owner's product in them, rendered from the owner's own photo, with no text |
+| SAM 3.1 | Finds the product in the owner's photo and in every rendered scene, so layouts keep the words off it and the video's end card shows the real product |
 | Meta Ads MCP server | Reads from a real ad account: campaigns, ad sets, ads, insights |
 | Marketing API | Every write, and the reads the MCP cannot answer in full |
 | Facebook Login for Business | Connects an ad account with only the permissions the owner grants |
@@ -143,12 +143,13 @@ The Python package and the command line are named `pgt`, after the project's wor
 | `src/pgt/llm/` | Model routing, the Meta and Baseten clients, Muse Image and SAM 3.1, answer repairs, the offline model |
 | `src/pgt/sandbox/` | The synthetic ad account and the businesses the demo and tests run on |
 | `src/pgt/ads/` | Real ad accounts: Ads MCP reads, Marketing API writes, Facebook Login |
-| `src/pgt/creative/` | Product cutout and ad composition |
+| `src/pgt/creative/` | Product cutouts, ad layouts in three sizes, and the 10-second video |
 | `src/pgt/api/`, `web/` | The FastAPI server and the React app |
-| `site/`, `replay/` | The public homepage and the recorded runs it embeds |
 | `bench/` | The comparison bench and its arms |
 | `spike/` | The Day 1 spike that chose Pydantic AI for the per-role agent loop |
 | `tests/` | Unit, API and scenario tests |
+
+The public website and the recorded runs it embeds live in a separate repository, [Pallas-ads/agent-beans](https://github.com/Pallas-ads/agent-beans). `pgt replay` produces those recordings.
 
 ## Documentation
 
