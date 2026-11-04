@@ -114,7 +114,7 @@ class AdsMcp:
         if self._ready:
             return
         self._send("initialize", {"protocolVersion": PROTOCOL_VERSION, "capabilities": {},
-                                  "clientInfo": {"name": "pallas-growth-team", "version": "0.1"}})
+                                  "clientInfo": {"name": "agent-beans", "version": "0.1"}})
         self._ready = True
         self._send("notifications/initialized", notify=True)
 
