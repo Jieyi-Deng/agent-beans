@@ -1,5 +1,7 @@
 # Agent Beans
 
+![Agent Beans, created by Jieyi Deng for the Meta Global AI Developer Hackathon: the Bean Crew, seven bean characters standing in a row](docs/images/cover.png)
+
 An always-on Meta ads growth team for small businesses and indie developers. Built on Meta's Muse models for the Meta Global AI Developer Hackathon (Indie developer track).
 
 Six AI specialists check your ad account every day, then plan and make new ads each week. A seventh member, the Operator, applies the changes. The Operator is plain code and acts only on what you approved. Every number the team shows traces back to source data.
@@ -157,12 +159,6 @@ The Python package and the command line are named `pgt`, after the project's wor
 | [Meta models and products](docs/meta-models.md) | Which Meta model or product runs each part, the cost of a live run, and why Meta's models matter here |
 | [Framework comparison](docs/HARNESS_COMPARISON.md) | Agent Beans against a single agent, an OpenAI Agents SDK team and a LangGraph team |
 | [Bench results](docs/BENCH_RESULTS.md), [live results](docs/LIVE_RESULTS.md) | Full tables from the offline and live runs |
-
-## Built during the hackathon
-
-Everything in this repository was written during the event, from October 27 to November 4, 2026.
-
-Pallas started before the event as an ad-analysis plugin for coding agents. None of that code is in this repository.
 
 ## License
 
