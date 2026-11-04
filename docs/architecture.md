@@ -1,6 +1,6 @@
 # Architecture
 
-Agent Beans (Agent Beans) is a small team of AI roles that runs Meta ads for one advertiser. The roles are language-model agents. Everything that decides whether their work is safe to use is ordinary code: the numbers they may quote, the tools they may call, the house rules a budget change must pass, the approval a write needs, and the money a run may spend.
+Agent Beans is a small team of AI roles that runs Meta ads for one advertiser. The roles are language-model agents. Everything that decides whether their work is safe to use is ordinary code: the numbers they may quote, the tools they may call, the house rules a budget change must pass, the approval a write needs, and the money a run may spend.
 
 This page shows how the pieces fit. Two companion pages go deeper:
 

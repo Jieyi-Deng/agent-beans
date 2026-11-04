@@ -25,7 +25,7 @@ function Sidebar({ route, waiting, mode, account }: { route: Route; waiting: num
   return (
     <aside className="col rule-r" style={{ background: "var(--sunken)", padding: "18px 12px", gap: 22 }}>
       <div className="mark" style={{ padding: "0 6px" }}>
-        <img className="mark-logo" src="pallas-logo.png" alt="Pallas" />
+        <img className="mark-logo" src="pallas-logo.png" alt="Agent Beans" />
         <div style={{ minWidth: 0 }}><div className="mark-name">Agent Beans</div><div className="mark-sub" title={account}>{account ?? "No account connected"}</div></div>
       </div>
       {mode && <a className={"mode " + mode} href="#/settings"
