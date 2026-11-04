@@ -71,7 +71,7 @@ export default function Settings({ tick, busy, sidebar, route, access, onAccess,
                 <div className="muted" style={{ fontSize: 12.5 }}>
                   The account is a synthetic sandbox. {data?.offline
                     ? "Each step runs the team on an offline stand-in that answers in the same shape as Muse, at no cost."
-                    : `Each step calls the real models and is charged at list price, up to the $${data?.cap ?? ""} cap.`} Nothing reaches a real ad account.
+                    : `Each step calls the real models and is charged at list price${data?.cap != null ? `, up to the $${data.cap} cap` : ""}.`} Nothing reaches a real ad account.
                 </div>
                 <div className="row" style={{ gap: 8, marginTop: 4, flexWrap: "wrap" }}>
                   <button className="btn ink" disabled={!!busy} onClick={() => run(api.runDay)}>Run the next day</button>

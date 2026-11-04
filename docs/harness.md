@@ -296,7 +296,7 @@ flowchart LR
     post -- "no" --> next["Continue"]
 ```
 
-Defaults are $0.50 per call, $1.00 per role per loop and $3.00 per loop, plus the `--cap` for the whole workspace on live runs. Two limits stop a single call from running away: the Strategist may run at most 8 web searches per call, and a Baseten reply stops at 12,000 output tokens. The recorded public run used $1.14 of a $5 cap.
+Defaults are $0.50 per call, $1.00 per role per loop and $3.00 per loop, plus the `--cap` for the whole workspace on live runs. Two limits stop a single call from running away: the Strategist may run at most 8 web searches per call, and a Baseten reply stops at 12,000 output tokens. The recorded Northpaw run on the public site cost $2.02 in total.
 
 ## What the bench shows
 
