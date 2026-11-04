@@ -361,6 +361,9 @@ def test_real_account_runs_in_its_own_workspace_at_l2(client, tmp_path):
     assert d["available"] and d["counts"] == {"campaign": 2, "ad set": 1, "ad": 2}
     assert team.real and team.ws is not sandbox_ws
     assert (tmp_path / "meta-act_42.db").exists()
+    # Only the sandbox is saved for a restart; a real account's state stays Meta's.
+    assert team.ws.saved_sandbox() is None
+    assert sandbox_ws.saved_sandbox()["state"]["day"] == sandbox_day
     a = client.get("/api/access").json()
     assert a["connection"]["account_id"] == "act_42" and a["level"] == 2
     assert a["connection"]["origin"] and "token" not in json.dumps(a)

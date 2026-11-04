@@ -56,6 +56,14 @@ class Team:
     def real(self) -> bool:
         return self.parked is not None
 
+    def save_sandbox(self) -> None:
+        """Keep the sandbox account in its workspace. Only the account lives in memory; the
+        rest of the team is in SQLite already. A real account's state is Meta's: never saved."""
+        from pgt.sandbox import SandboxAccount
+
+        if not self.real and isinstance(self.account, SandboxAccount):
+            self.ws.save_sandbox(self.account.dump())
+
     def run(self, label: str, coro) -> None:
         if self.busy:
             coro.close()
@@ -64,9 +72,13 @@ class Team:
 
         async def wrapper():
             try:
-                await coro
-            except Exception as exc:  # noqa: BLE001 - shown in the UI; the event log has the rest
-                self.error = f"{label} failed: {exc}"
+                try:
+                    await coro
+                except Exception as exc:  # noqa: BLE001 - shown in the UI; the event log has the rest
+                    self.error = f"{label} failed: {exc}"
+                # Every change to the sandbox happens in a run (seed, days, weeks, the Operator).
+                # A run cancelled at shutdown is not saved: a restart runs it again.
+                self.save_sandbox()
             finally:
                 self.busy = None
 
@@ -206,6 +218,7 @@ def use_real_account(team: Team, account: dict, transport=None, mcp_transport=No
               else date.today() - timedelta(days=lookback))
     meter = team.meter
     total = None if meter is None or meter.total is None else meter.remaining()
+    team.save_sandbox()  # parked as saved: nothing touches it until the owner comes back
     team.parked = (team.ws, team.meter, team.account)
     team.ws, team.meter = ws, CostMeter(ws.events, total=total)
     mcp = None if os.environ.get("META_ADS_MCP") == "0" else AdsMcp(token, mcp_transport)
@@ -324,6 +337,9 @@ def create_app(team: Team, web_dist: str | Path | None = None, seed_days: int | 
 
     @asynccontextmanager
     async def lifespan(_app):
+        # A restart on an existing workspace: the sandbox account as the last run left it.
+        if team.account is None and (saved := team.ws.saved_sandbox()) is not None:
+            team.account = SandboxAccount.load(saved)
         if seed_days and not team.ws.events.list("loop.started"):
             team.run("Setting up the demo week", seed(team, seed_days))
         elif not seed_days and team.ws.facts.version == 0:
@@ -654,6 +670,7 @@ def create_app(team: Team, web_dist: str | Path | None = None, seed_days: int | 
             account = {k: v for k, v in sandbox.items() if k != "blurb"}
             if team.account is None and not seed_days:
                 team.account = SandboxAccount(template.scenario())
+                team.save_sandbox()
         else:
             reason = meta_login.unavailable(team.public)
             if reason:
