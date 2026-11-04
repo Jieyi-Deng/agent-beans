@@ -225,6 +225,7 @@ erDiagram
 - **Facts** are versioned. Only the owner and the Growth Lead may set them.
 - **Evidence** is write-once: re-adding an ID with different content is an error, so a number can never silently change under a claim that cites it.
 - **Events** record everything else: every model call with its token counts, cost, context hash and fact version; every tool call and blocked tool call; handoffs, questions and answers; approvals, voided approvals and writes.
+- **The sandbox account** (campaigns, ads, daily results and the Operator's writes) is saved as one row after every team run, so a server restarted on the same file carries on where it stopped. A real account's state is never saved: it is read from Meta again.
 
 In the live e-commerce run recorded for the public demo (14 days, one full weekly review), the log holds 117 model calls, 126 tool calls, 337 evidence entries and 83 published deliverables.
 

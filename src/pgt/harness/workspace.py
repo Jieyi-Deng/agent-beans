@@ -1,5 +1,6 @@
 """One SQLite workspace for the deterministic collaboration harness."""
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -24,6 +25,22 @@ class Workspace:
         self.requests = RequestStore(self.events)
         with self.events._transaction():  # memory reads filter the log by event type
             self._conn.execute("CREATE INDEX IF NOT EXISTS events_type ON events (type, id)")
+            self._conn.execute("CREATE TABLE IF NOT EXISTS sandbox "
+                               "(id INTEGER PRIMARY KEY CHECK (id = 1), content TEXT NOT NULL)")
+
+    def save_sandbox(self, data: dict) -> None:
+        """Keep the sandbox ad account's state (`SandboxAccount.dump()`), replacing the last
+        one, so a restarted server carries on where it was. Never a real account's."""
+        with self.events._transaction():
+            self._conn.execute(
+                "INSERT INTO sandbox (id, content) VALUES (1, ?) "
+                "ON CONFLICT (id) DO UPDATE SET content = excluded.content", (json.dumps(data),))
+
+    def saved_sandbox(self) -> dict | None:
+        """The sandbox account's state as last saved, or None (a workspace from before the
+        sandbox was saved, or one that never had it)."""
+        row = self._conn.execute("SELECT content FROM sandbox WHERE id = 1").fetchone()
+        return json.loads(row[0]) if row else None
 
     def close(self) -> None:
         self._conn.close()
