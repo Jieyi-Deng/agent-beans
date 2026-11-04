@@ -43,7 +43,7 @@ flowchart TB
     loops --> image & sam
     loops -->|"reads"| account
     operator -->|"approved writes only"| account
-    api -.->|"pgt replay"| pages["GitHub Pages<br/>static replay"]
+    api -.->|"pgt replay"| pages["Static replay<br/>published from the website repo"]
 ```
 
 A run is driven by loops. A loop gathers data from the account, hands tasks to roles, checks what comes back, and publishes typed deliverables to the workspace. The owner sees every step in the Team Room, which is a live view of the event log, and approves or sends back the deliverables that would change the account.
@@ -56,7 +56,7 @@ A run is driven by loops. A loop gathers data from the account, hands tasks to r
 | `pgt.roles` | One module per role: prompt, typed output and inputs. `metrics.py` computes every derived number in code, so no role does arithmetic. `operator.py` is the only writer |
 | `pgt.harness` | `events.py` (append-only log), `artifacts.py` (versioned deliverables with stale propagation), `facts.py` (versioned shared facts), `ledger.py` + `verify.py` (evidence and number checks), `creative_checks.py`, `policy.py` (tool allowlist, house-rule gate, spend caps), `approvals.py` (hash-bound approvals), `protocol.py` (handoff, ask/answer, escalation), `context.py` (context assembly), `access.py` (L0 to L2) |
 | `pgt.llm` | `runtime.py` (runs a role as a Pydantic AI agent inside the harness), `routing.py` (model per role), `meta.py` and `baseten.py` (providers), `media.py` (Muse Image and SAM 3.1), `offline.py` and `fake.py` (deterministic stand-ins for tests) |
-| `pgt.creative` | `compose.py`: SAM cutout, layout and rendering of the three ad sizes |
+| `pgt.creative` | `compose.py` (product cutouts and shared drawing helpers), `design.py` (the band, panel, poster and offer layouts in 1:1, 4:5 and 9:16), `video.py` (the 10-second 9:16 video and the Reviewer's contact sheet) |
 | `pgt.ads` | `meta_account.py` (a real account behind the sandbox interface), `ads_mcp.py` (Meta Ads MCP client), `graph.py` (Graph API client), `meta_login.py` (Facebook Login for Business) |
 | `pgt.sandbox` | Synthetic businesses (an indie fitness app and a pet-supplies store) with simulated delivery |
 | `pgt.schemas` | Pydantic models for every deliverable. Model-returned types use strict JSON schema |
@@ -159,11 +159,13 @@ flowchart TB
     ck3 --> ap1{"Approval 1<br/>test plan"}
 
     subgraph s2["Stage 2: produce_week"]
-        seg["SAM 3.1: cut out each product once"] --> prod
-        prod["Producer per test, in parallel<br/>copy and scene; may ask the Analyst"] --> bg["Muse Image: background"]
-        bg --> comp["Compositor: 1:1, 4:5, 9:16"]
-        comp --> ck4["Code: lengths, numbers, claims, image files"]
-        ck4 --> vis["Reviewer model sees the 1:1 image"]
+        seg["SAM 3.1: find each product<br/>in the owner's photo, once"] --> prod
+        prod["Producer per test, in parallel<br/>copy, three scenes, storyboard;<br/>may ask the Analyst"] --> mi["Muse Image: three scenes<br/>with the product, owner's photo as reference"]
+        mi --> sam2["SAM 3.1: find the product in each scene"]
+        sam2 --> comp["Layouts 1:1, 4:5, 9:16<br/>and the 10-second video"]
+        comp --> ck4["Code: lengths, numbers, claims,<br/>files, product in frame, words off it"]
+        ck4 --> vis["Reviewer model sees the owner's photo,<br/>every scene and the video's frames"]
+        ck4 -- "redo" --> prod
         vis -- "redo, up to 2 times" --> prod
         vis -- "pass" --> cs["Change set: new ads"]
     end
@@ -271,7 +273,7 @@ The API checks the level before it accepts an approval, and the Operator checks 
 
 ## The public replay
 
-The public site is a homepage plus two recordings of real live runs, served as static files: Northpaw Supply, a pet-supplies store (`--template ecommerce`), and Beans' Active, a fitness app starting cold (`--template app --cold`). It calls no model and holds no key.
+The public site is a homepage plus two recordings of real live runs, served as static files: Northpaw Supply, a pet-supplies store (`--template ecommerce`), and Beans' Active, a fitness app starting cold (`--template app --cold`). It calls no model and holds no key. The site and its recordings live in a separate repository, [Pallas-ads/agent-beans](https://github.com/Pallas-ads/agent-beans); this repository only produces the recordings.
 
 ```mermaid
 flowchart TB
@@ -281,7 +283,8 @@ flowchart TB
     rep --> chk{"Synthetic only?<br/>no local paths, keys,<br/>tokens or real account IDs"}
     chk -- "no" --> stop(["Refuse and delete the output"])
     chk -- "yes" --> files["replay/&lt;run&gt;/data/*.json<br/>replay/&lt;run&gt;/media/*"]
-    files --> ci["GitHub Actions<br/>site/build.sh: homepage at the root,<br/>one replay per run under demo/"]
+    files -- "copied into" --> site["Website repo<br/>Pallas-ads/agent-beans"]
+    site --> ci["GitHub Actions<br/>site/build.sh: homepage at the root,<br/>one replay per run under demo/"]
     ci --> pages["GitHub Pages"]
 ```
 
@@ -289,7 +292,7 @@ The replay build of the web app maps each API path to a JSON file (`/api/dashboa
 
 ## Testing
 
-- `uv run pytest`: 200 tests. Unit tests cover each harness component; acceptance tests run whole daily and weekly loops on the offline model; API tests drive the FastAPI app and the replay export.
+- `uv run pytest` runs the whole suite. Unit tests cover each harness component; acceptance tests run whole daily and weekly loops on the offline model; API tests drive the FastAPI app and the replay export.
 - The offline model (`pgt.llm.offline`) is deterministic and can plant specific mistakes (a wrong number, an unsupported claim, an injected instruction), so the tests prove the harness catches them rather than hoping the model avoids them.
 - The Meta Ads MCP, the Graph API and both model providers are behind injectable transports, so no test touches the network.
 - `bench/` runs the same scenarios against Agent Beans, five ablations, a single agent, an OpenAI Agents SDK team and a LangGraph team. See [BENCH_RESULTS.md](BENCH_RESULTS.md).

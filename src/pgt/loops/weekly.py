@@ -2,9 +2,10 @@
 
 1. plan_week: findings -> Intake -> Analyst and Strategist in parallel -> test plan.
    Stops for approval 1 (the test plan).
-2. produce_week: one Creative Producer per test (ask/answer with the Analyst, Muse Image,
-   SAM 3.1, compositor) -> code checks -> model review, with up to two redos -> change set
-   of new ads. Stops for approval 2 (the change set).
+2. produce_week: one Creative Producer per test (ask/answer with the Analyst) -> Muse Image
+   scenes from the owner's photo -> SAM 3.1 finds the product -> layouts and video -> code
+   checks -> model review, with up to two redos -> change set of new ads. Stops for approval 2
+   (the change set).
 3. apply_week: the Operator creates the approved ads, PAUSED, in the sandbox.
 
 Each stage refuses to run without a valid approval of the stage before it.
